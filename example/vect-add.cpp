@@ -58,12 +58,25 @@ int main() {
 
 		// Kernel source code can be loaded in two ways: 
 		// 1. .spv binary read from file at runtime.
-		const char* testFile = "build/vect-add.spv";
 		// 2. .spv binary loaded into the executable at compile time.
+		
+#ifdef USE_EMBEDDED_SPIRV
 		std::vector<uint32_t> spvCode =
 		#include "build/vect-add.cinit"
-		;	
+		;
 		auto program = easyvk::Program(device, spvCode, bufs);
+#else
+		// Use file-based loading when embedded SPIR-V isn't available
+		const char *testFile = "vect-add.spv";
+		// Check if file exists, if not print error and exit gracefully
+		std::ifstream spv_file(testFile, std::ios::binary);
+		if (!spv_file.good()) {
+			printf("Error: SPIR-V file '%s' not found. Please compile the OpenCL kernel first.\n", testFile);
+			return 1;
+		}
+		spv_file.close();
+		auto program = easyvk::Program(device, testFile, bufs);
+#endif
 
 		program.setWorkgroups(size);
 		program.setWorkgroupSize(1);
