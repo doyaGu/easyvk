@@ -173,7 +173,7 @@ namespace easyvk {
     }
   }
 
-  static auto VKAPI_ATTR debugReporter(VkDebugReportFlagsEXT, VkDebugReportObjectTypeEXT, uint64_t, size_t, int32_t, const char *pLayerPrefix, const char *pMessage, void *pUserData) -> VkBool32 {
+  static VKAPI_ATTR VkBool32 VKAPI_CALL debugReporter(VkDebugReportFlagsEXT, VkDebugReportObjectTypeEXT, uint64_t, size_t, int32_t, const char *pLayerPrefix, const char *pMessage, void *pUserData) {
     std::cerr << "\x1B[31m[Vulkan:" << pLayerPrefix << "]\033[0m " << pMessage << "\n";
     return VK_FALSE;
   }
