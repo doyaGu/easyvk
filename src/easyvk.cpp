@@ -216,6 +216,36 @@ namespace easyvk {
         }
     }
 
+    Instance::Instance(Instance &&other) noexcept
+        : enableValidationLayers_(other.enableValidationLayers_),
+          instance_(other.instance_),
+          debugReportCallback_(other.debugReportCallback_),
+          tornDown_(other.tornDown_) {
+        // Reset other object to prevent double cleanup
+        other.instance_ = VK_NULL_HANDLE;
+        other.debugReportCallback_ = VK_NULL_HANDLE;
+        other.tornDown_ = true;
+    }
+
+    Instance &Instance::operator=(Instance &&other) noexcept {
+        if (this != &other) {
+            // Cleanup current resources
+            teardown();
+
+            // Transfer ownership from other
+            enableValidationLayers_ = other.enableValidationLayers_;
+            instance_ = other.instance_;
+            debugReportCallback_ = other.debugReportCallback_;
+            tornDown_ = other.tornDown_;
+
+            // Reset other object
+            other.instance_ = VK_NULL_HANDLE;
+            other.debugReportCallback_ = VK_NULL_HANDLE;
+            other.tornDown_ = true;
+        }
+        return *this;
+    }
+
     Instance::~Instance() {
         if (!tornDown_) {
             teardown();
@@ -364,6 +394,45 @@ namespace easyvk {
         vkGetPhysicalDeviceProperties(physicalDevice_, &properties);
     }
 
+    Device::Device(Device &&other) noexcept
+        : device(other.device),
+          properties(other.properties),
+          computeFamilyId(other.computeFamilyId),
+          computeQueue(other.computeQueue),
+          supportsAMDShaderStats(other.supportsAMDShaderStats),
+          instance_(other.instance_),
+          physicalDevice_(other.physicalDevice_),
+          tornDown_(other.tornDown_) {
+        // Reset other object to prevent double cleanup
+        other.device = VK_NULL_HANDLE;
+        other.computeQueue = VK_NULL_HANDLE;
+        other.physicalDevice_ = VK_NULL_HANDLE;
+        other.tornDown_ = true;
+    }
+
+    Device &Device::operator=(Device &&other) noexcept {
+        if (this != &other) {
+            // Cleanup current resources
+            teardown();
+
+            // Transfer ownership from other
+            device = other.device;
+            properties = other.properties;
+            computeFamilyId = other.computeFamilyId;
+            computeQueue = other.computeQueue;
+            supportsAMDShaderStats = other.supportsAMDShaderStats;
+            physicalDevice_ = other.physicalDevice_;
+            tornDown_ = other.tornDown_;
+
+            // Reset other object
+            other.device = VK_NULL_HANDLE;
+            other.computeQueue = VK_NULL_HANDLE;
+            other.physicalDevice_ = VK_NULL_HANDLE;
+            other.tornDown_ = true;
+        }
+        return *this;
+    }
+
     Device::~Device() {
         if (!tornDown_) {
             teardown();
@@ -451,6 +520,47 @@ namespace easyvk {
             .commandBufferCount = 1
         };
         VK_CHECK(vkAllocateCommandBuffers(device.device, &commandBufferAllocInfo, &commandBuffer));
+    }
+
+    Buffer::Buffer(Buffer &&other) noexcept
+        : device(other.device),
+          commandPool(other.commandPool),
+          commandBuffer(other.commandBuffer),
+          memory(other.memory),
+          buffer(other.buffer),
+          size(other.size),
+          deviceLocal(other.deviceLocal),
+          tornDown_(other.tornDown_) {
+        // Reset other object to prevent double cleanup
+        other.commandPool = VK_NULL_HANDLE;
+        other.commandBuffer = VK_NULL_HANDLE;
+        other.memory = VK_NULL_HANDLE;
+        other.buffer = VK_NULL_HANDLE;
+        other.tornDown_ = true;
+    }
+
+    Buffer &Buffer::operator=(Buffer &&other) noexcept {
+        if (this != &other) {
+            // Cleanup current resources
+            teardown();
+
+            // Transfer ownership from other
+            commandPool = other.commandPool;
+            commandBuffer = other.commandBuffer;
+            memory = other.memory;
+            buffer = other.buffer;
+            size = other.size;
+            deviceLocal = other.deviceLocal;
+            tornDown_ = other.tornDown_;
+
+            // Reset other object
+            other.commandPool = VK_NULL_HANDLE;
+            other.commandBuffer = VK_NULL_HANDLE;
+            other.memory = VK_NULL_HANDLE;
+            other.buffer = VK_NULL_HANDLE;
+            other.tornDown_ = true;
+        }
+        return *this;
     }
 
     Buffer::~Buffer() {
@@ -801,6 +911,84 @@ namespace easyvk {
           timestampQueryPool_(VK_NULL_HANDLE),
           initialized_(false),
           tornDown_(false) {
+    }
+
+    Program::Program(Program &&other) noexcept
+        : buffers_(other.buffers_),
+          workgroupMemoryLengths_(std::move(other.workgroupMemoryLengths_)),
+          shaderModule_(other.shaderModule_),
+          device_(other.device_),
+          descriptorSetLayout_(other.descriptorSetLayout_),
+          descriptorPool_(other.descriptorPool_),
+          descriptorSet_(other.descriptorSet_),
+          writeDescriptorSets_(std::move(other.writeDescriptorSets_)),
+          bufferInfos_(std::move(other.bufferInfos_)),
+          pipelineLayout_(other.pipelineLayout_),
+          pipeline_(other.pipeline_),
+          commandPool_(other.commandPool_),
+          numWorkgroups_(other.numWorkgroups_),
+          workgroupSize_(other.workgroupSize_),
+          pushConstantSizeBytes_(other.pushConstantSizeBytes_),
+          fence_(other.fence_),
+          commandBuffer_(other.commandBuffer_),
+          timestampQueryPool_(other.timestampQueryPool_),
+          initialized_(other.initialized_),
+          tornDown_(other.tornDown_) {
+        // Reset other object to prevent double cleanup
+        other.shaderModule_ = VK_NULL_HANDLE;
+        other.descriptorSetLayout_ = VK_NULL_HANDLE;
+        other.descriptorPool_ = VK_NULL_HANDLE;
+        other.descriptorSet_ = VK_NULL_HANDLE;
+        other.pipelineLayout_ = VK_NULL_HANDLE;
+        other.pipeline_ = VK_NULL_HANDLE;
+        other.commandPool_ = VK_NULL_HANDLE;
+        other.fence_ = VK_NULL_HANDLE;
+        other.commandBuffer_ = VK_NULL_HANDLE;
+        other.timestampQueryPool_ = VK_NULL_HANDLE;
+        other.initialized_ = false;
+        other.tornDown_ = true;
+    }
+
+    Program &Program::operator=(Program &&other) noexcept {
+        if (this != &other) {
+            // Cleanup current resources
+            teardown();
+
+            // Transfer ownership from other
+            workgroupMemoryLengths_ = std::move(other.workgroupMemoryLengths_);
+            shaderModule_ = other.shaderModule_;
+            descriptorSetLayout_ = other.descriptorSetLayout_;
+            descriptorPool_ = other.descriptorPool_;
+            descriptorSet_ = other.descriptorSet_;
+            writeDescriptorSets_ = std::move(other.writeDescriptorSets_);
+            bufferInfos_ = std::move(other.bufferInfos_);
+            pipelineLayout_ = other.pipelineLayout_;
+            pipeline_ = other.pipeline_;
+            commandPool_ = other.commandPool_;
+            numWorkgroups_ = other.numWorkgroups_;
+            workgroupSize_ = other.workgroupSize_;
+            pushConstantSizeBytes_ = other.pushConstantSizeBytes_;
+            fence_ = other.fence_;
+            commandBuffer_ = other.commandBuffer_;
+            timestampQueryPool_ = other.timestampQueryPool_;
+            initialized_ = other.initialized_;
+            tornDown_ = other.tornDown_;
+
+            // Reset other object
+            other.shaderModule_ = VK_NULL_HANDLE;
+            other.descriptorSetLayout_ = VK_NULL_HANDLE;
+            other.descriptorPool_ = VK_NULL_HANDLE;
+            other.descriptorSet_ = VK_NULL_HANDLE;
+            other.pipelineLayout_ = VK_NULL_HANDLE;
+            other.pipeline_ = VK_NULL_HANDLE;
+            other.commandPool_ = VK_NULL_HANDLE;
+            other.fence_ = VK_NULL_HANDLE;
+            other.commandBuffer_ = VK_NULL_HANDLE;
+            other.timestampQueryPool_ = VK_NULL_HANDLE;
+            other.initialized_ = false;
+            other.tornDown_ = true;
+        }
+        return *this;
     }
 
     Program::~Program() {

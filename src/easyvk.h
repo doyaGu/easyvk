@@ -61,8 +61,8 @@ namespace easyvk {
         ~Instance();
         Instance(const Instance &) = delete;
         Instance &operator=(const Instance &) = delete;
-        Instance(Instance &&) = delete;
-        Instance &operator=(Instance &&) = delete;
+        Instance(Instance &&other) noexcept;
+        Instance &operator=(Instance &&other) noexcept;
 
         std::vector<VkPhysicalDevice> physicalDevices();
         void teardown();
@@ -80,8 +80,8 @@ namespace easyvk {
         ~Device();
         Device(const Device &) = delete;
         Device &operator=(const Device &) = delete;
-        Device(Device &&) = delete;
-        Device &operator=(Device &&) = delete;
+        Device(Device &&other) noexcept;
+        Device &operator=(Device &&other) noexcept;
 
         VkDevice device;
         VkPhysicalDeviceProperties properties;
@@ -105,8 +105,8 @@ namespace easyvk {
         ~Buffer();
         Buffer(const Buffer &) = delete;
         Buffer &operator=(const Buffer &) = delete;
-        Buffer(Buffer &&) = delete;
-        Buffer &operator=(Buffer &&) = delete;
+        Buffer(Buffer &&other) noexcept;
+        Buffer &operator=(Buffer &&other) noexcept;
 
         void teardown();
         void copy(Buffer &dst, uint64_t len, uint64_t srcOffset = 0, uint64_t dstOffset = 0);
@@ -151,8 +151,8 @@ namespace easyvk {
         ~Program();
         Program(const Program &) = delete;
         Program &operator=(const Program &) = delete;
-        Program(Program &&) = delete;
-        Program &operator=(Program &&) = delete;
+        Program(Program &&other) noexcept;
+        Program &operator=(Program &&other) noexcept;
 
         void initialize(const char *entryPoint = "main", VkPipelineShaderStageCreateFlags pipelineFlags = 0);
         std::vector<ShaderStatistics> getShaderStats();
