@@ -16,28 +16,6 @@ if(NOT CMAKE_CXX_STANDARD_REQUIRED)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
 endif()
 
-# Find Vulkan package with better error handling
-find_package(Vulkan QUIET)
-if(NOT Vulkan_FOUND)
-    message(STATUS "Vulkan not found via find_package, attempting manual detection")
-    find_path(VULKAN_INCLUDE_DIR vulkan/vulkan.h
-        HINTS $ENV{VULKAN_SDK}/include
-        PATHS /usr/include /usr/local/include)
-    find_library(VULKAN_LIBRARY vulkan
-        HINTS $ENV{VULKAN_SDK}/lib
-        PATHS /usr/lib /usr/local/lib)
-    
-    if(VULKAN_INCLUDE_DIR AND VULKAN_LIBRARY)
-        set(Vulkan_FOUND TRUE)
-        add_library(Vulkan::Vulkan UNKNOWN IMPORTED)
-        set_target_properties(Vulkan::Vulkan PROPERTIES
-            IMPORTED_LOCATION ${VULKAN_LIBRARY}
-            INTERFACE_INCLUDE_DIRECTORIES ${VULKAN_INCLUDE_DIR})
-    else()
-        message(FATAL_ERROR "Vulkan not found. Please install Vulkan SDK or set VULKAN_SDK environment variable.")
-    endif()
-endif()
-
 # Set platform-specific defines for Volk
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
@@ -64,13 +42,9 @@ add_library(EasyVK::easyvk ALIAS easyvk)
 target_include_directories(easyvk PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:include>
-    volk
 )
 
-target_link_libraries(easyvk PUBLIC
-    volk
-    Vulkan::Vulkan
-)
+target_link_libraries(easyvk PUBLIC volk)
 
 # Android-specific settings
 if(ANDROID)
@@ -84,8 +58,8 @@ endif()
 
 # Options - only show in main project to avoid cluttering parent project cache
 if(EASYVK_MAIN_PROJECT)
-    option(EASYVK_INSTALL "Enable installation" OFF)
-    option(EASYVK_BUILD_EXAMPLES "Build examples" OFF)
+    option(EASYVK_INSTALL "Enable installation" ON)
+    option(EASYVK_BUILD_EXAMPLES "Build examples" ON)
 else()
     option(EASYVK_INSTALL "Enable installation" OFF)
     option(EASYVK_BUILD_EXAMPLES "Build examples" OFF)
