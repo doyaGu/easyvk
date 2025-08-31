@@ -10,7 +10,7 @@ endif()
 
 # Set C++ standard only if not already set by parent
 if(NOT CMAKE_CXX_STANDARD)
-    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD 11)
 endif()
 if(NOT CMAKE_CXX_STANDARD_REQUIRED)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -79,7 +79,7 @@ endif()
 
 # Set target compile features
 if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.1")
-    target_compile_features(easyvk PUBLIC cxx_std_20)
+    target_compile_features(easyvk PUBLIC cxx_std_11)
 endif()
 
 # Options - only show in main project to avoid cluttering parent project cache

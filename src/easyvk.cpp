@@ -1068,7 +1068,9 @@ namespace easyvk {
         specMapContent[2] = 1;
 
         // Key is index, value is length
-        for (const auto &[key, value] : workgroupMemoryLengths_) {
+        for (const auto &pair : workgroupMemoryLengths_) {
+            const auto key = pair.first;
+            const auto value = pair.second;
             specMap[3 + key] = VkSpecializationMapEntry{3 + key, (3 + key) * 4, sizeof(uint32_t)};
             specMapContent[3 + key] = value;
         }
