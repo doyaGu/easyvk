@@ -1,5 +1,5 @@
 /*
-   Copyright 2023 Reese	Levine,	Devon McKee, Sean Siddens
+   Copyright 2023 Reese Levine, Devon McKee, Sean Siddens
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@
 
 namespace easyvk {
     // Configuration constants
-    static constexpr uint32_t DEFAULT_PUSH_CONSTANT_SIZE_BYTES = 20;
+    static constexpr uint32_t DEFAULT_PUSH_CONSTANT_SIZE_BYTES = 128;
     static constexpr uint32_t INVALID_QUEUE_FAMILY = UINT32_MAX;
 
     // Exception class for Vulkan errors
@@ -70,13 +70,14 @@ namespace easyvk {
     private:
         bool enableValidationLayers_;
         VkInstance instance_;
+        VkDebugUtilsMessengerEXT debugUtilsMessenger_;
         VkDebugReportCallbackEXT debugReportCallback_;
         bool tornDown_;
     };
 
     class Device {
     public:
-        Device(Instance &instance, VkPhysicalDevice physicalDevice);
+        Device(Instance &instance, VkPhysicalDevice physicalDevice, bool enableRobustness = true);
         ~Device();
         Device(const Device &) = delete;
         Device &operator=(const Device &) = delete;
@@ -91,11 +92,24 @@ namespace easyvk {
         const char *vendorName() const;
         VkQueue computeQueue;
         bool supportsAMDShaderStats;
+        uint32_t maxPushConstantSize() const { return maxPushConstantSize_; }
+        VkDeviceSize nonCoherentAtomSize() const { return nonCoherentAtomSize_; }
+        VkDeviceSize minMemoryMapAlignment() const { return minMemoryMapAlignment_; }
+
+        // Timestamp support
+        bool supportsTimestamps() const { return supportsTimestamps_; }
+        double timestampPeriod() const { return timestampPeriod_; }
+
         void teardown();
 
     private:
         Instance &instance_;
         VkPhysicalDevice physicalDevice_;
+        uint32_t maxPushConstantSize_;
+        VkDeviceSize nonCoherentAtomSize_;
+        VkDeviceSize minMemoryMapAlignment_;
+        bool supportsTimestamps_;
+        double timestampPeriod_;
         bool tornDown_;
     };
 
@@ -116,8 +130,6 @@ namespace easyvk {
         void fill(uint32_t word, uint64_t offset = 0);
 
         Device &device;
-        VkCommandPool commandPool;
-        VkCommandBuffer commandBuffer;
         VkDeviceMemory memory;
         VkBuffer buffer;
         uint64_t size;
@@ -127,6 +139,17 @@ namespace easyvk {
         void validateRange(uint64_t offset, uint64_t len, const char *operation) const;
         void copyInternal(VkBuffer src, VkBuffer dst, uint64_t len, uint64_t srcOffset = 0, uint64_t dstOffset = 0);
         void createVkBuffer(VkBuffer *buf, VkDeviceMemory *mem, uint64_t sizeBytes, VkBufferUsageFlags usage, VkMemoryPropertyFlags props);
+        void submitAndWait(VkCommandBuffer cmdBuf);
+        void flushRange(VkDeviceSize offset, VkDeviceSize sizeBytes);
+        void invalidateRange(VkDeviceSize offset, VkDeviceSize sizeBytes);
+        void *mapAligned(VkDeviceSize offset, VkDeviceSize sizeBytes);
+        void unmapAligned(VkDeviceSize offset);
+
+        static VkDeviceSize alignDown(VkDeviceSize value, VkDeviceSize alignment);
+        static VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment);
+
+        VkFence fence_;
+        bool isCoherent_;
         bool tornDown_;
     };
 
@@ -141,6 +164,9 @@ namespace easyvk {
      * A program consists of shader code and the buffers/inputs to the shader
      * Buffers should be passed in according to their argument order in the shader.
      * Workgroup memory buffers are indexed from 0.
+     *
+     * Specialization constants: IDs 0,1,2 are reserved for workgroup dimensions (x,y,z).
+     * Additional spec constants for workgroup memory start from ID 3.
      */
     class Program {
     public:
@@ -155,10 +181,28 @@ namespace easyvk {
         void initialize(const char *entryPoint = "main", VkPipelineShaderStageCreateFlags pipelineFlags = 0);
         std::vector<ShaderStatistics> getShaderStats() const;
         void run();
-        float runWithDispatchTiming();
-        void setWorkgroups(uint32_t numWorkgroups);
+
+        // Returns timing in nanoseconds as double precision (0.0 if timestamps not supported)
+        double runWithDispatchTiming();
+
+        // Backward compatible single parameter version
+        void setWorkgroups(uint32_t numWorkgroups) { setWorkgroups(numWorkgroups, 1, 1); }
+        // 3D dispatch support
+        void setWorkgroups(uint32_t x, uint32_t y, uint32_t z);
+
         void setWorkgroupSize(uint32_t workgroupSize);
         void setWorkgroupMemoryLength(uint32_t length, uint32_t index);
+
+        // Typed push constants
+        template<typename T>
+        void setPushConstants(const T& data, uint32_t offset = 0) {
+            static_assert(sizeof(T) % 4 == 0, "Push constant data must be 4-byte aligned");
+            setPushConstantsImpl(&data, sizeof(T), offset);
+        }
+
+        // Raw push constants
+        void setPushConstants(const void* data, uint32_t bytes, uint32_t offset = 0);
+
         void teardown();
 
     private:
@@ -174,14 +218,18 @@ namespace easyvk {
         VkPipelineLayout pipelineLayout_;
         VkPipeline pipeline_;
         VkCommandPool commandPool_;
-        uint32_t numWorkgroups_;
+        uint32_t numWorkgroupsX_, numWorkgroupsY_, numWorkgroupsZ_;
         uint32_t workgroupSize_;
         uint32_t pushConstantSizeBytes_;
         VkFence fence_;
         VkCommandBuffer commandBuffer_;
         VkQueryPool timestampQueryPool_;
+        std::vector<uint8_t> pushConstantData_;
         bool initialized_;
         bool tornDown_;
+
+        void setPushConstantsImpl(const void* data, uint32_t bytes, uint32_t offset);
+        void submitAndWait();
     };
 
     const char *vkDeviceType(VkPhysicalDeviceType type);

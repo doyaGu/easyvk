@@ -1,5 +1,5 @@
 /*
-   Copyright 2023 Reese	Levine,	Devon McKee, Sean Siddens
+   Copyright 2023 Reese Levine, Devon McKee, Sean Siddens
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 #include <cstdarg>
 #include <iostream>
 #include <fstream>
+#include <algorithm>
 
 // TODO: extend this to include ios logging lib
 void evk_log(const char *fmt, ...) {
@@ -137,14 +138,26 @@ namespace easyvk {
         }
     }
 
+    static VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageTypes, const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData, void *pUserData) {
+        std::cerr << "\x1B[31m[Vulkan:" << pCallbackData->pMessageIdName << "]\033[0m " << pCallbackData->pMessage << "\n";
+        return VK_FALSE;
+    }
+
     static VKAPI_ATTR VkBool32 VKAPI_CALL debugReporter(VkDebugReportFlagsEXT, VkDebugReportObjectTypeEXT, uint64_t, size_t, int32_t, const char *pLayerPrefix, const char *pMessage, void *pUserData) {
+        // Note: VK_EXT_debug_report is deprecated in favor of VK_EXT_debug_utils
         std::cerr << "\x1B[31m[Vulkan:" << pLayerPrefix << "]\033[0m " << pMessage << "\n";
         return VK_FALSE;
+    }
+
+    // Verify SPIR-V magic number for better error messages
+    inline bool isValidSPIRV(const std::vector<uint32_t> &code) {
+        return !code.empty() && code[0] == 0x07230203;
     }
 
     Instance::Instance(bool enableValidationLayers)
         : enableValidationLayers_(enableValidationLayers),
           instance_(VK_NULL_HANDLE),
+          debugUtilsMessenger_(VK_NULL_HANDLE),
           debugReportCallback_(VK_NULL_HANDLE),
           tornDown_(false) {
         std::vector<const char *> enabledLayers;
@@ -153,7 +166,26 @@ namespace easyvk {
 
         if (enableValidationLayers_) {
             enabledLayers.push_back("VK_LAYER_KHRONOS_validation");
-            enabledExtensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+
+            // Always prefer VK_EXT_debug_utils (VK_EXT_debug_report is deprecated)
+            uint32_t extensionCount = 0;
+            vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
+            std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+            vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, availableExtensions.data());
+
+            bool hasDebugUtils = false;
+            for (const auto& ext : availableExtensions) {
+                if (strcmp(ext.extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
+                    hasDebugUtils = true;
+                    break;
+                }
+            }
+
+            if (hasDebugUtils) {
+                enabledExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+            } else {
+                evk_log("Warning: VK_EXT_debug_utils not available, debug messages will be limited\n");
+            }
         }
 
 #ifdef __APPLE__
@@ -193,18 +225,19 @@ namespace easyvk {
         volkLoadInstance(instance_);
 
         if (enableValidationLayers_) {
-            VkDebugReportCallbackCreateInfoEXT debugCreateInfo{
-                .sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,
-                .pNext = nullptr,
-                .flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT,
-                .pfnCallback = debugReporter,
-                .pUserData = nullptr
-            };
-
-            // Load debug report callback extension
-            auto createFN = PFN_vkCreateDebugReportCallbackEXT(vkGetInstanceProcAddr(instance_, "vkCreateDebugReportCallbackEXT"));
-            if (createFN) {
-                createFN(instance_, &debugCreateInfo, nullptr, &debugReportCallback_);
+            // Try debug utils first
+            auto createDebugUtilsFN = PFN_vkCreateDebugUtilsMessengerEXT(vkGetInstanceProcAddr(instance_, "vkCreateDebugUtilsMessengerEXT"));
+            if (createDebugUtilsFN) {
+                VkDebugUtilsMessengerCreateInfoEXT debugUtilsCreateInfo{
+                    .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+                    .pNext = nullptr,
+                    .flags = 0,
+                    .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+                    .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+                    .pfnUserCallback = debugUtilsCallback,
+                    .pUserData = nullptr
+                };
+                createDebugUtilsFN(instance_, &debugUtilsCreateInfo, nullptr, &debugUtilsMessenger_);
             }
         }
 
@@ -219,10 +252,12 @@ namespace easyvk {
     Instance::Instance(Instance &&other) noexcept
         : enableValidationLayers_(other.enableValidationLayers_),
           instance_(other.instance_),
+          debugUtilsMessenger_(other.debugUtilsMessenger_),
           debugReportCallback_(other.debugReportCallback_),
           tornDown_(other.tornDown_) {
         // Reset other object to prevent double cleanup
         other.instance_ = VK_NULL_HANDLE;
+        other.debugUtilsMessenger_ = VK_NULL_HANDLE;
         other.debugReportCallback_ = VK_NULL_HANDLE;
         other.tornDown_ = true;
     }
@@ -235,11 +270,13 @@ namespace easyvk {
             // Transfer ownership from other
             enableValidationLayers_ = other.enableValidationLayers_;
             instance_ = other.instance_;
+            debugUtilsMessenger_ = other.debugUtilsMessenger_;
             debugReportCallback_ = other.debugReportCallback_;
             tornDown_ = other.tornDown_;
 
             // Reset other object
             other.instance_ = VK_NULL_HANDLE;
+            other.debugUtilsMessenger_ = VK_NULL_HANDLE;
             other.debugReportCallback_ = VK_NULL_HANDLE;
             other.tornDown_ = true;
         }
@@ -267,6 +304,15 @@ namespace easyvk {
     void Instance::teardown() {
         if (tornDown_) return;
 
+        // Destroy debug utils messenger
+        if (enableValidationLayers_ && debugUtilsMessenger_ != VK_NULL_HANDLE) {
+            auto destroyFn = PFN_vkDestroyDebugUtilsMessengerEXT(vkGetInstanceProcAddr(instance_, "vkDestroyDebugUtilsMessengerEXT"));
+            if (destroyFn) {
+                destroyFn(instance_, debugUtilsMessenger_, nullptr);
+            }
+            debugUtilsMessenger_ = VK_NULL_HANDLE;
+        }
+
         // Destroy debug report callback extension
         if (enableValidationLayers_ && debugReportCallback_ != VK_NULL_HANDLE) {
             auto destroyFn = PFN_vkDestroyDebugReportCallbackEXT(vkGetInstanceProcAddr(instance_, "vkDestroyDebugReportCallbackEXT"));
@@ -285,7 +331,7 @@ namespace easyvk {
         tornDown_ = true;
     }
 
-    uint32_t getComputeFamilyId(VkPhysicalDevice physicalDevice) {
+    uint32_t getDedicatedComputeFamilyId(VkPhysicalDevice physicalDevice) {
         // Get queue family count
         uint32_t queueFamilyPropertyCount = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyPropertyCount, nullptr);
@@ -293,7 +339,31 @@ namespace easyvk {
         std::vector<VkQueueFamilyProperties> familyProperties(queueFamilyPropertyCount);
         vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyPropertyCount, familyProperties.data());
 
-        // Get compute family id based on size of family properties
+        // First pass: look for dedicated compute queue (COMPUTE_BIT set, GRAPHICS_BIT not set)
+        for (uint32_t i = 0; i < familyProperties.size(); ++i) {
+            if (familyProperties[i].queueCount > 0 &&
+                (familyProperties[i].queueFlags & VK_QUEUE_COMPUTE_BIT) &&
+                !(familyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+                return i;
+            }
+        }
+        return INVALID_QUEUE_FAMILY;
+    }
+
+    uint32_t getComputeFamilyId(VkPhysicalDevice physicalDevice) {
+        // Try to get dedicated compute queue first
+        uint32_t dedicatedId = getDedicatedComputeFamilyId(physicalDevice);
+        if (dedicatedId != INVALID_QUEUE_FAMILY) {
+            return dedicatedId;
+        }
+
+        // Fall back to any compute queue
+        uint32_t queueFamilyPropertyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyPropertyCount, nullptr);
+
+        std::vector<VkQueueFamilyProperties> familyProperties(queueFamilyPropertyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyPropertyCount, familyProperties.data());
+
         for (uint32_t i = 0; i < familyProperties.size(); ++i) {
             if (familyProperties[i].queueCount > 0 && (familyProperties[i].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
                 return i;
@@ -302,7 +372,34 @@ namespace easyvk {
         return INVALID_QUEUE_FAMILY;
     }
 
-    Device::Device(Instance &instance, VkPhysicalDevice physicalDevice)
+    // Global command pool for device transfers (thread-local for safety)
+    thread_local VkCommandPool g_transferCommandPool = VK_NULL_HANDLE;
+    thread_local VkDevice g_transferDevice = VK_NULL_HANDLE;
+    thread_local uint32_t g_transferQueueFamilyId = INVALID_QUEUE_FAMILY;
+
+    VkCommandPool getTransferCommandPool(VkDevice device, uint32_t queueFamilyId) {
+        if (g_transferCommandPool == VK_NULL_HANDLE || g_transferDevice != device || g_transferQueueFamilyId != queueFamilyId) {
+            // Clean up old pool if device changed
+            if (g_transferCommandPool != VK_NULL_HANDLE && g_transferDevice != VK_NULL_HANDLE) {
+                vkDestroyCommandPool(g_transferDevice, g_transferCommandPool, nullptr);
+                g_transferCommandPool = VK_NULL_HANDLE;
+            }
+
+            // Create new command pool for this device/queue family
+            VkCommandPoolCreateInfo poolInfo{
+                .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+                .queueFamilyIndex = queueFamilyId
+            };
+            VK_CHECK(vkCreateCommandPool(device, &poolInfo, nullptr, &g_transferCommandPool));
+            g_transferDevice = device;
+            g_transferQueueFamilyId = queueFamilyId;
+        }
+        return g_transferCommandPool;
+    }
+
+    Device::Device(Instance &instance, VkPhysicalDevice physicalDevice, bool enableRobustness)
         : device(VK_NULL_HANDLE),
           properties(),
           computeFamilyId(getComputeFamilyId(physicalDevice)),
@@ -310,9 +407,32 @@ namespace easyvk {
           supportsAMDShaderStats(false),
           instance_(instance),
           physicalDevice_(physicalDevice),
+          maxPushConstantSize_(0),
+          nonCoherentAtomSize_(1),
+          minMemoryMapAlignment_(1),
+          supportsTimestamps_(false),
+          timestampPeriod_(0.0),
           tornDown_(false) {
         if (computeFamilyId == INVALID_QUEUE_FAMILY) {
             throw std::runtime_error("No compute queue family found");
+        }
+
+        // Get device properties to cache limits
+        vkGetPhysicalDeviceProperties(physicalDevice_, &properties);
+        maxPushConstantSize_ = properties.limits.maxPushConstantsSize;
+        nonCoherentAtomSize_ = properties.limits.nonCoherentAtomSize;
+        minMemoryMapAlignment_ = properties.limits.minMemoryMapAlignment;
+        timestampPeriod_ = static_cast<double>(properties.limits.timestampPeriod);
+
+        // Check timestamp support on compute queue family
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice_, &queueFamilyCount, nullptr);
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice_, &queueFamilyCount, queueFamilies.data());
+
+        if (computeFamilyId < queueFamilies.size()) {
+            supportsTimestamps_ = (queueFamilies[computeFamilyId].timestampValidBits > 0) &&
+                                  (properties.limits.timestampPeriod > 0);
         }
 
         // Define device queue info
@@ -333,12 +453,15 @@ namespace easyvk {
         vkEnumerateDeviceExtensionProperties(physicalDevice_, nullptr, &pPropertyCount, extensions.data());
 
         std::vector<const char *> enabledExtensions{};
+        bool hasPipelineExecutableProps = false;
+
         for (const auto &extension : extensions) {
             if (strcmp(extension.extensionName, "VK_AMD_shader_info") == 0) {
                 enabledExtensions.push_back(VK_AMD_SHADER_INFO_EXTENSION_NAME);
                 supportsAMDShaderStats = true;
             } else if (strcmp(extension.extensionName, "VK_KHR_pipeline_executable_properties") == 0) {
                 enabledExtensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
+                hasPipelineExecutableProps = true;
             } else if (strcmp(extension.extensionName, "VK_KHR_portability_subset") == 0) {
                 enabledExtensions.push_back("VK_KHR_portability_subset");
             } else if (strcmp(extension.extensionName, "VK_KHR_shader_non_semantic_info") == 0) {
@@ -355,7 +478,8 @@ namespace easyvk {
         // Enable pipeline executable properties reporting
         VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR pipelineProperties{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
-            .pNext = &vulkan13Features
+            .pNext = &vulkan13Features,
+            .pipelineExecutableInfo = hasPipelineExecutableProps ? VK_TRUE : VK_FALSE
         };
 
         // Mostly for enabling buffer device addresses
@@ -370,7 +494,7 @@ namespace easyvk {
         };
 
         vkGetPhysicalDeviceFeatures2(physicalDevice_, &features2);
-        features2.features.robustBufferAccess = VK_FALSE;
+        features2.features.robustBufferAccess = enableRobustness ? VK_TRUE : VK_FALSE;
 
         // Define device info
         VkDeviceCreateInfo deviceCreateInfo{
@@ -390,9 +514,6 @@ namespace easyvk {
         VK_CHECK(vkCreateDevice(physicalDevice_, &deviceCreateInfo, nullptr, &device));
         // Get queue handle
         vkGetDeviceQueue(device, computeFamilyId, 0, &computeQueue);
-
-        // Get device properties
-        vkGetPhysicalDeviceProperties(physicalDevice_, &properties);
     }
 
     Device::Device(Device &&other) noexcept
@@ -403,6 +524,11 @@ namespace easyvk {
           supportsAMDShaderStats(other.supportsAMDShaderStats),
           instance_(other.instance_),
           physicalDevice_(other.physicalDevice_),
+          maxPushConstantSize_(other.maxPushConstantSize_),
+          nonCoherentAtomSize_(other.nonCoherentAtomSize_),
+          minMemoryMapAlignment_(other.minMemoryMapAlignment_),
+          supportsTimestamps_(other.supportsTimestamps_),
+          timestampPeriod_(other.timestampPeriod_),
           tornDown_(other.tornDown_) {
         // Reset other object to prevent double cleanup
         other.device = VK_NULL_HANDLE;
@@ -423,6 +549,11 @@ namespace easyvk {
             computeQueue = other.computeQueue;
             supportsAMDShaderStats = other.supportsAMDShaderStats;
             physicalDevice_ = other.physicalDevice_;
+            maxPushConstantSize_ = other.maxPushConstantSize_;
+            nonCoherentAtomSize_ = other.nonCoherentAtomSize_;
+            minMemoryMapAlignment_ = other.minMemoryMapAlignment_;
+            supportsTimestamps_ = other.supportsTimestamps_;
+            timestampPeriod_ = other.timestampPeriod_;
             tornDown_ = other.tornDown_;
 
             // Reset other object
@@ -474,6 +605,19 @@ namespace easyvk {
     void Device::teardown() {
         if (tornDown_) return;
 
+        // Wait for all device operations to complete before cleanup
+        if (device != VK_NULL_HANDLE) {
+            vkDeviceWaitIdle(device);
+        }
+
+        // Clean up thread-local command pool if it belongs to this device
+        if (g_transferDevice == device && g_transferCommandPool != VK_NULL_HANDLE) {
+            vkDestroyCommandPool(device, g_transferCommandPool, nullptr);
+            g_transferCommandPool = VK_NULL_HANDLE;
+            g_transferDevice = VK_NULL_HANDLE;
+            g_transferQueueFamilyId = INVALID_QUEUE_FAMILY;
+        }
+
         if (device != VK_NULL_HANDLE) {
             vkDestroyDevice(device, nullptr);
             device = VK_NULL_HANDLE;
@@ -486,57 +630,65 @@ namespace easyvk {
 
     Buffer::Buffer(Device &device, uint64_t sizeBytes, bool deviceLocal)
         : device(device),
-          commandPool(VK_NULL_HANDLE),
-          commandBuffer(VK_NULL_HANDLE),
           memory(VK_NULL_HANDLE),
           buffer(VK_NULL_HANDLE),
           size(sizeBytes),
           deviceLocal(deviceLocal),
+          fence_(VK_NULL_HANDLE),
+          isCoherent_(false),
           tornDown_(false) {
         if (sizeBytes == 0) {
             throw std::invalid_argument("Buffer size cannot be zero");
         }
 
-        // Create VkBuffer
-        VkMemoryPropertyFlags memProp = deviceLocal ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT : VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+        // Create VkBuffer - prefer coherent memory for host-visible buffers
+        VkMemoryPropertyFlags memProp;
+        if (deviceLocal) {
+            memProp = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+            isCoherent_ = true; // device local doesn't need coherency management
+        } else {
+            // Try coherent first, fall back to cached if coherent fails
+            memProp = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        }
+
         VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
-        createVkBuffer(&buffer, &memory, sizeBytes, usage, memProp);
+        try {
+            createVkBuffer(&buffer, &memory, sizeBytes, usage, memProp);
+            isCoherent_ = !deviceLocal && (memProp & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        } catch (const std::exception&) {
+            if (!deviceLocal && (memProp & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+                // Fall back to cached memory
+                memProp = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+                createVkBuffer(&buffer, &memory, sizeBytes, usage, memProp);
+                isCoherent_ = false;
+            } else {
+                throw;
+            }
+        }
 
-        // Create command pool for copy commands
-        VkCommandPoolCreateInfo commandPoolCreateInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        // Create fence for synchronization
+        VkFenceCreateInfo fenceCreateInfo{
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
             .pNext = nullptr,
-            .flags = 0,
-            .queueFamilyIndex = device.computeFamilyId
+            .flags = 0
         };
-        VK_CHECK(vkCreateCommandPool(device.device, &commandPoolCreateInfo, nullptr, &commandPool));
-
-        // Allocate command buffer from command pool
-        VkCommandBufferAllocateInfo commandBufferAllocInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .pNext = nullptr,
-            .commandPool = commandPool,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1
-        };
-        VK_CHECK(vkAllocateCommandBuffers(device.device, &commandBufferAllocInfo, &commandBuffer));
+        VK_CHECK(vkCreateFence(device.device, &fenceCreateInfo, nullptr, &fence_));
     }
 
     Buffer::Buffer(Buffer &&other) noexcept
         : device(other.device),
-          commandPool(other.commandPool),
-          commandBuffer(other.commandBuffer),
           memory(other.memory),
           buffer(other.buffer),
           size(other.size),
           deviceLocal(other.deviceLocal),
+          fence_(other.fence_),
+          isCoherent_(other.isCoherent_),
           tornDown_(other.tornDown_) {
         // Reset other object to prevent double cleanup
-        other.commandPool = VK_NULL_HANDLE;
-        other.commandBuffer = VK_NULL_HANDLE;
         other.memory = VK_NULL_HANDLE;
         other.buffer = VK_NULL_HANDLE;
+        other.fence_ = VK_NULL_HANDLE;
         other.tornDown_ = true;
     }
 
@@ -546,19 +698,18 @@ namespace easyvk {
             teardown();
 
             // Transfer ownership from other
-            commandPool = other.commandPool;
-            commandBuffer = other.commandBuffer;
             memory = other.memory;
             buffer = other.buffer;
             size = other.size;
             deviceLocal = other.deviceLocal;
+            fence_ = other.fence_;
+            isCoherent_ = other.isCoherent_;
             tornDown_ = other.tornDown_;
 
             // Reset other object
-            other.commandPool = VK_NULL_HANDLE;
-            other.commandBuffer = VK_NULL_HANDLE;
             other.memory = VK_NULL_HANDLE;
             other.buffer = VK_NULL_HANDLE;
+            other.fence_ = VK_NULL_HANDLE;
             other.tornDown_ = true;
         }
         return *this;
@@ -575,6 +726,42 @@ namespace easyvk {
             throw std::out_of_range(std::string("Buffer ") + operation + " out of bounds: offset=" +
                 std::to_string(offset) + " len=" + std::to_string(len) + " size=" + std::to_string(size));
         }
+    }
+
+    void Buffer::copyInternal(VkBuffer src, VkBuffer dst, uint64_t len, uint64_t srcOffset, uint64_t dstOffset) {
+        VkCommandPool cmdPool = getTransferCommandPool(device.device, device.computeFamilyId);
+
+        VkCommandBuffer cmdBuf;
+        VkCommandBufferAllocateInfo allocInfo{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .pNext = nullptr,
+            .commandPool = cmdPool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1
+        };
+        VK_CHECK(vkAllocateCommandBuffers(device.device, &allocInfo, &cmdBuf));
+
+        // Begin recording command buffer, record command to copy buffer to buffer, end command buffer record
+        VkCommandBufferBeginInfo beginInfo{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .pNext = nullptr,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+            .pInheritanceInfo = nullptr
+        };
+        VK_CHECK(vkBeginCommandBuffer(cmdBuf, &beginInfo));
+
+        VkBufferCopy copyRegion{
+            .srcOffset = srcOffset,
+            .dstOffset = dstOffset,
+            .size = len
+        };
+        vkCmdCopyBuffer(cmdBuf, src, dst, 1, &copyRegion);
+        VK_CHECK(vkEndCommandBuffer(cmdBuf));
+
+        submitAndWait(cmdBuf);
+
+        // Command buffer is automatically freed when pool is reset
+        vkFreeCommandBuffers(device.device, cmdPool, 1, &cmdBuf);
     }
 
     void Buffer::createVkBuffer(VkBuffer *buf, VkDeviceMemory *mem, uint64_t sizeBytes, VkBufferUsageFlags usage, VkMemoryPropertyFlags props) {
@@ -605,17 +792,87 @@ namespace easyvk {
         VK_CHECK(vkBindBufferMemory(device.device, *buf, *mem, 0));
     }
 
+    void Buffer::submitAndWait(VkCommandBuffer cmdBuf) {
+        VK_CHECK(vkResetFences(device.device, 1, &fence_));
+
+        VkSubmitInfo submitInfo{
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = nullptr,
+            .waitSemaphoreCount = 0,
+            .pWaitSemaphores = nullptr,
+            .pWaitDstStageMask = nullptr,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &cmdBuf,
+            .signalSemaphoreCount = 0,
+            .pSignalSemaphores = nullptr
+        };
+
+        VK_CHECK(vkQueueSubmit(device.computeQueue, 1, &submitInfo, fence_));
+        VK_CHECK(vkWaitForFences(device.device, 1, &fence_, VK_TRUE, UINT64_MAX));
+    }
+
+    void Buffer::flushRange(VkDeviceSize offset, VkDeviceSize sizeBytes) {
+        if (isCoherent_ || deviceLocal) return;
+
+        VkDeviceSize atomSize = device.nonCoherentAtomSize();
+        VkDeviceSize alignedOffset = alignDown(offset, atomSize);
+        VkDeviceSize alignedSize = alignUp(sizeBytes + (offset - alignedOffset), atomSize);
+
+        VkMappedMemoryRange range{
+            .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+            .pNext = nullptr,
+            .memory = memory,
+            .offset = alignedOffset,
+            .size = alignedSize
+        };
+        VK_CHECK(vkFlushMappedMemoryRanges(device.device, 1, &range));
+    }
+
+    void Buffer::invalidateRange(VkDeviceSize offset, VkDeviceSize sizeBytes) {
+        if (isCoherent_ || deviceLocal) return;
+
+        VkDeviceSize atomSize = device.nonCoherentAtomSize();
+        VkDeviceSize alignedOffset = alignDown(offset, atomSize);
+        VkDeviceSize alignedSize = alignUp(sizeBytes + (offset - alignedOffset), atomSize);
+
+        VkMappedMemoryRange range{
+            .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+            .pNext = nullptr,
+            .memory = memory,
+            .offset = alignedOffset,
+            .size = alignedSize
+        };
+        VK_CHECK(vkInvalidateMappedMemoryRanges(device.device, 1, &range));
+    }
+
+    void *Buffer::mapAligned(VkDeviceSize offset, VkDeviceSize sizeBytes) {
+        VkDeviceSize alignment = device.minMemoryMapAlignment();
+        VkDeviceSize alignedOffset = alignDown(offset, alignment);
+        VkDeviceSize extra = offset - alignedOffset;
+
+        void *mappedPtr;
+        VK_CHECK(vkMapMemory(device.device, memory, alignedOffset, sizeBytes + extra, 0, &mappedPtr));
+        return static_cast<char *>(mappedPtr) + extra;
+    }
+
+    void Buffer::unmapAligned(VkDeviceSize offset) {
+        vkUnmapMemory(device.device, memory);
+    }
+
+    VkDeviceSize Buffer::alignDown(VkDeviceSize value, VkDeviceSize alignment) {
+        return value & ~(alignment - 1);
+    }
+
+    VkDeviceSize Buffer::alignUp(VkDeviceSize value, VkDeviceSize alignment) {
+        return (value + alignment - 1) & ~(alignment - 1);
+    }
+
     void Buffer::teardown() {
         if (tornDown_) return;
 
-        if (commandBuffer != VK_NULL_HANDLE && commandPool != VK_NULL_HANDLE) {
-            vkFreeCommandBuffers(device.device, commandPool, 1, &commandBuffer);
-            commandBuffer = VK_NULL_HANDLE;
-        }
-
-        if (commandPool != VK_NULL_HANDLE) {
-            vkDestroyCommandPool(device.device, commandPool, nullptr);
-            commandPool = VK_NULL_HANDLE;
+        if (fence_ != VK_NULL_HANDLE) {
+            vkDestroyFence(device.device, fence_, nullptr);
+            fence_ = VK_NULL_HANDLE;
         }
 
         if (memory != VK_NULL_HANDLE) {
@@ -629,43 +886,6 @@ namespace easyvk {
         }
 
         tornDown_ = true;
-    }
-
-    void Buffer::copyInternal(VkBuffer src, VkBuffer dst, uint64_t len, uint64_t srcOffset, uint64_t dstOffset) {
-        // Begin recording command buffer, record command to copy buffer to buffer, end command buffer record
-        VkCommandBufferBeginInfo beginInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext = nullptr,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-            .pInheritanceInfo = nullptr
-        };
-        VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
-
-        VkBufferCopy copyRegion{
-            .srcOffset = srcOffset,
-            .dstOffset = dstOffset,
-            .size = len
-        };
-        vkCmdCopyBuffer(commandBuffer, src, dst, 1, &copyRegion);
-        VK_CHECK(vkEndCommandBuffer(commandBuffer));
-
-        // Submit command buffer to queue, wait for completion
-        VkSubmitInfo submitInfo{
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .pNext = nullptr,
-            .waitSemaphoreCount = 0,
-            .pWaitSemaphores = nullptr,
-            .pWaitDstStageMask = nullptr,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &commandBuffer,
-            .signalSemaphoreCount = 0,
-            .pSignalSemaphores = nullptr
-        };
-        VK_CHECK(vkQueueSubmit(device.computeQueue, 1, &submitInfo, VK_NULL_HANDLE));
-        VK_CHECK(vkQueueWaitIdle(device.computeQueue));
-
-        // Reset command pool (and all buffers in it) for next use
-        VK_CHECK(vkResetCommandPool(device.device, commandPool, 0));
     }
 
     void Buffer::copy(Buffer &dst, uint64_t len, uint64_t srcOffset, uint64_t dstOffset) {
@@ -684,12 +904,39 @@ namespace easyvk {
             // Allocate staging buffer of copy size
             VkBuffer staging;
             VkDeviceMemory stagingMemory;
-            createVkBuffer(&staging, &stagingMemory, len, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+            // Try coherent staging buffer first
+            VkMemoryPropertyFlags stagingProps = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+            bool stagingCoherent = true;
+
+            try {
+                createVkBuffer(&staging, &stagingMemory, len, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, stagingProps);
+            } catch (const std::exception&) {
+                stagingProps = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+                createVkBuffer(&staging, &stagingMemory, len, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, stagingProps);
+                stagingCoherent = false;
+            }
 
             // Copy src region to staging buffer region
             void *stagingPtr;
             VK_CHECK(vkMapMemory(device.device, stagingMemory, 0, len, 0, &stagingPtr));
             memcpy(stagingPtr, static_cast<const char *>(src) + srcOffset, len);
+
+            // Proper non-coherent memory alignment for staging buffer
+            if (!stagingCoherent) {
+                VkDeviceSize atomSize = device.nonCoherentAtomSize();
+                VkDeviceSize alignedSize = alignUp(len, atomSize);
+
+                VkMappedMemoryRange range{
+                    .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+                    .pNext = nullptr,
+                    .memory = stagingMemory,
+                    .offset = 0,
+                    .size = alignedSize
+                };
+                VK_CHECK(vkFlushMappedMemoryRanges(device.device, 1, &range));
+            }
+
             vkUnmapMemory(device.device, stagingMemory);
 
             // Copy staging buffer region to device local buffer region
@@ -699,11 +946,11 @@ namespace easyvk {
             vkFreeMemory(device.device, stagingMemory, nullptr);
             vkDestroyBuffer(device.device, staging, nullptr);
         } else {
-            // Map host visible buffer, copy memory, unmap
-            void *bufferPtr;
-            VK_CHECK(vkMapMemory(device.device, memory, dstOffset, len, 0, &bufferPtr));
+            // Map host visible buffer with proper alignment, copy memory, flush if needed, unmap
+            void *bufferPtr = mapAligned(dstOffset, len);
             memcpy(bufferPtr, static_cast<const char *>(src) + srcOffset, len);
-            vkUnmapMemory(device.device, memory);
+            flushRange(dstOffset, len);
+            unmapAligned(dstOffset);
         }
     }
 
@@ -716,13 +963,40 @@ namespace easyvk {
         if (deviceLocal) {
             VkBuffer staging;
             VkDeviceMemory stagingMemory;
-            createVkBuffer(&staging, &stagingMemory, len, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+            // Try coherent staging buffer first
+            VkMemoryPropertyFlags stagingProps = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+            bool stagingCoherent = true;
+
+            try {
+                createVkBuffer(&staging, &stagingMemory, len, VK_BUFFER_USAGE_TRANSFER_DST_BIT, stagingProps);
+            } catch (const std::exception&) {
+                stagingProps = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+                createVkBuffer(&staging, &stagingMemory, len, VK_BUFFER_USAGE_TRANSFER_DST_BIT, stagingProps);
+                stagingCoherent = false;
+            }
 
             // Copy device local buffer region to staging buffer region
             copyInternal(buffer, staging, len, srcOffset, 0);
 
             void *stagingPtr;
             VK_CHECK(vkMapMemory(device.device, stagingMemory, 0, len, 0, &stagingPtr));
+
+            // Proper non-coherent memory alignment for staging buffer
+            if (!stagingCoherent) {
+                VkDeviceSize atomSize = device.nonCoherentAtomSize();
+                VkDeviceSize alignedSize = alignUp(len, atomSize);
+
+                VkMappedMemoryRange range{
+                    .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+                    .pNext = nullptr,
+                    .memory = stagingMemory,
+                    .offset = 0,
+                    .size = alignedSize
+                };
+                VK_CHECK(vkInvalidateMappedMemoryRanges(device.device, 1, &range));
+            }
+
             memcpy(static_cast<char *>(dst) + dstOffset, stagingPtr, len);
             vkUnmapMemory(device.device, stagingMemory);
 
@@ -730,45 +1004,46 @@ namespace easyvk {
             vkFreeMemory(device.device, stagingMemory, nullptr);
             vkDestroyBuffer(device.device, staging, nullptr);
         } else {
-            // Map host visible buffer, copy memory, unmap
-            void *bufferPtr;
-            VK_CHECK(vkMapMemory(device.device, memory, srcOffset, len, 0, &bufferPtr));
+            // Invalidate before reading, map host visible buffer with proper alignment, copy memory, unmap
+            invalidateRange(srcOffset, len);
+            void *bufferPtr = mapAligned(srcOffset, len);
             memcpy(static_cast<char *>(dst) + dstOffset, bufferPtr, len);
-            vkUnmapMemory(device.device, memory);
+            unmapAligned(srcOffset);
         }
     }
 
     void Buffer::fill(uint32_t word, uint64_t offset) {
+        if (offset % 4 != 0) {
+            throw std::invalid_argument("Fill offset must be 4-byte aligned");
+        }
         validateRange(offset, size - offset, "fill");
 
-        // Begin command buffer, encode commands to fill buffer and staging buffer with word
+        VkCommandPool cmdPool = getTransferCommandPool(device.device, device.computeFamilyId);
+
+        VkCommandBuffer cmdBuf;
+        VkCommandBufferAllocateInfo allocInfo{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .pNext = nullptr,
+            .commandPool = cmdPool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1
+        };
+        VK_CHECK(vkAllocateCommandBuffers(device.device, &allocInfo, &cmdBuf));
+
+        // Begin command buffer, encode commands to fill buffer with word
         VkCommandBufferBeginInfo beginInfo{
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .pNext = nullptr,
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
             .pInheritanceInfo = nullptr
         };
-        VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
-        vkCmdFillBuffer(commandBuffer, buffer, offset, size - offset, word);
-        VK_CHECK(vkEndCommandBuffer(commandBuffer));
+        VK_CHECK(vkBeginCommandBuffer(cmdBuf, &beginInfo));
+        vkCmdFillBuffer(cmdBuf, buffer, offset, VK_WHOLE_SIZE, word);
+        VK_CHECK(vkEndCommandBuffer(cmdBuf));
 
-        // Submit command buffer to queue, wait for completion
-        VkSubmitInfo submitInfo{
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .pNext = nullptr,
-            .waitSemaphoreCount = 0,
-            .pWaitSemaphores = nullptr,
-            .pWaitDstStageMask = nullptr,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &commandBuffer,
-            .signalSemaphoreCount = 0,
-            .pSignalSemaphores = nullptr
-        };
-        VK_CHECK(vkQueueSubmit(device.computeQueue, 1, &submitInfo, VK_NULL_HANDLE));
-        VK_CHECK(vkQueueWaitIdle(device.computeQueue));
+        submitAndWait(cmdBuf);
 
-        // Reset command pool (and all buffers in it) for next use
-        VK_CHECK(vkResetCommandPool(device.device, commandPool, 0));
+        vkFreeCommandBuffers(device.device, cmdPool, 1, &cmdBuf);
     }
 
     void Buffer::clear() {
@@ -777,7 +1052,7 @@ namespace easyvk {
 
     // -------------------------------------------------------------------------------
 
-    std::vector<uint32_t> read_spirv(const char *filename) {
+    std::vector<uint32_t> readSpirv(const char *filename) {
         auto fin = std::ifstream(filename, std::ios::binary | std::ios::ate);
         if (!fin.is_open()) {
             throw std::runtime_error(std::string("failed opening file ") + filename + " for reading");
@@ -791,6 +1066,10 @@ namespace easyvk {
     }
 
     VkShaderModule initShaderModule(Device &device, const std::vector<uint32_t> &spvCode) {
+        if (!isValidSPIRV(spvCode)) {
+            throw std::runtime_error("Invalid SPIR-V: missing or incorrect magic number (0x07230203)");
+        }
+
         VkShaderModuleCreateInfo createInfo{
             .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
             .pNext = nullptr,
@@ -805,7 +1084,7 @@ namespace easyvk {
     }
 
     VkShaderModule initShaderModule(Device &device, const char *filepath) {
-        std::vector<uint32_t> code = read_spirv(filepath);
+        std::vector<uint32_t> code = readSpirv(filepath);
         // Create shader module with spv code
         return initShaderModule(device, code);
     }
@@ -882,7 +1161,9 @@ namespace easyvk {
           pipelineLayout_(VK_NULL_HANDLE),
           pipeline_(VK_NULL_HANDLE),
           commandPool_(VK_NULL_HANDLE),
-          numWorkgroups_(1),
+          numWorkgroupsX_(1),
+          numWorkgroupsY_(1),
+          numWorkgroupsZ_(1),
           workgroupSize_(1),
           pushConstantSizeBytes_(pushConstantSizeBytes),
           fence_(VK_NULL_HANDLE),
@@ -890,6 +1171,17 @@ namespace easyvk {
           timestampQueryPool_(VK_NULL_HANDLE),
           initialized_(false),
           tornDown_(false) {
+
+        // Validate push constant size
+        if (pushConstantSizeBytes == 0 || pushConstantSizeBytes % 4 != 0) {
+            throw std::invalid_argument("Push constant size must be non-zero and 4-byte aligned");
+        }
+        if (pushConstantSizeBytes > device.maxPushConstantSize()) {
+            throw std::invalid_argument("Push constant size exceeds device limit of " +
+                std::to_string(device.maxPushConstantSize()) + " bytes");
+        }
+
+        pushConstantData_.resize(pushConstantSizeBytes, 0);
     }
 
     Program::Program(Device &device, const std::vector<uint32_t> &spvCode, std::vector<Buffer> &buffers, uint32_t pushConstantSizeBytes)
@@ -902,7 +1194,9 @@ namespace easyvk {
           pipelineLayout_(VK_NULL_HANDLE),
           pipeline_(VK_NULL_HANDLE),
           commandPool_(VK_NULL_HANDLE),
-          numWorkgroups_(1),
+          numWorkgroupsX_(1),
+          numWorkgroupsY_(1),
+          numWorkgroupsZ_(1),
           workgroupSize_(1),
           pushConstantSizeBytes_(pushConstantSizeBytes),
           fence_(VK_NULL_HANDLE),
@@ -910,6 +1204,17 @@ namespace easyvk {
           timestampQueryPool_(VK_NULL_HANDLE),
           initialized_(false),
           tornDown_(false) {
+
+        // Validate push constant size
+        if (pushConstantSizeBytes == 0 || pushConstantSizeBytes % 4 != 0) {
+            throw std::invalid_argument("Push constant size must be non-zero and 4-byte aligned");
+        }
+        if (pushConstantSizeBytes > device.maxPushConstantSize()) {
+            throw std::invalid_argument("Push constant size exceeds device limit of " +
+                std::to_string(device.maxPushConstantSize()) + " bytes");
+        }
+
+        pushConstantData_.resize(pushConstantSizeBytes, 0);
     }
 
     Program::Program(Program &&other) noexcept
@@ -925,12 +1230,15 @@ namespace easyvk {
           pipelineLayout_(other.pipelineLayout_),
           pipeline_(other.pipeline_),
           commandPool_(other.commandPool_),
-          numWorkgroups_(other.numWorkgroups_),
+          numWorkgroupsX_(other.numWorkgroupsX_),
+          numWorkgroupsY_(other.numWorkgroupsY_),
+          numWorkgroupsZ_(other.numWorkgroupsZ_),
           workgroupSize_(other.workgroupSize_),
           pushConstantSizeBytes_(other.pushConstantSizeBytes_),
           fence_(other.fence_),
           commandBuffer_(other.commandBuffer_),
           timestampQueryPool_(other.timestampQueryPool_),
+          pushConstantData_(std::move(other.pushConstantData_)),
           initialized_(other.initialized_),
           tornDown_(other.tornDown_) {
         // Reset other object to prevent double cleanup
@@ -964,12 +1272,15 @@ namespace easyvk {
             pipelineLayout_ = other.pipelineLayout_;
             pipeline_ = other.pipeline_;
             commandPool_ = other.commandPool_;
-            numWorkgroups_ = other.numWorkgroups_;
+            numWorkgroupsX_ = other.numWorkgroupsX_;
+            numWorkgroupsY_ = other.numWorkgroupsY_;
+            numWorkgroupsZ_ = other.numWorkgroupsZ_;
             workgroupSize_ = other.workgroupSize_;
             pushConstantSizeBytes_ = other.pushConstantSizeBytes_;
             fence_ = other.fence_;
             commandBuffer_ = other.commandBuffer_;
             timestampQueryPool_ = other.timestampQueryPool_;
+            pushConstantData_ = std::move(other.pushConstantData_);
             initialized_ = other.initialized_;
             tornDown_ = other.tornDown_;
 
@@ -1055,24 +1366,29 @@ namespace easyvk {
         // Update contents of descriptor set object
         vkUpdateDescriptorSets(device_.device, static_cast<uint32_t>(writeDescriptorSets_.size()), writeDescriptorSets_.data(), 0, nullptr);
 
-        uint32_t numSpecConstants = 3 + static_cast<uint32_t>(workgroupMemoryLengths_.size());
+        // Handle sparse spec-constant IDs correctly to prevent buffer overruns
+        uint32_t maxWorkgroupMemoryIndex = 0;
+        for (const auto &pair : workgroupMemoryLengths_) {
+            maxWorkgroupMemoryIndex = std::max(maxWorkgroupMemoryIndex, pair.first);
+        }
+        const uint32_t numSpecConstants = 3 + (workgroupMemoryLengths_.empty() ? 0 : (maxWorkgroupMemoryIndex + 1));
         std::vector<VkSpecializationMapEntry> specMap(numSpecConstants);
         std::vector<uint32_t> specMapContent(numSpecConstants);
 
-        // First three specialization constants are the workgroup size
-        specMap[0] = VkSpecializationMapEntry{0, 0, sizeof(uint32_t)};
+        // Specialization constants: spec IDs {0,1,2} for workgroup size (x,y,z)
+        specMap[0] = VkSpecializationMapEntry{0, 0 * sizeof(uint32_t), sizeof(uint32_t)};
         specMapContent[0] = workgroupSize_;
-        specMap[1] = VkSpecializationMapEntry{1, 4, sizeof(uint32_t)};
+        specMap[1] = VkSpecializationMapEntry{1, 1 * sizeof(uint32_t), sizeof(uint32_t)};
         specMapContent[1] = 1;
-        specMap[2] = VkSpecializationMapEntry{2, 8, sizeof(uint32_t)};
+        specMap[2] = VkSpecializationMapEntry{2, 2 * sizeof(uint32_t), sizeof(uint32_t)};
         specMapContent[2] = 1;
 
-        // Key is index, value is length
+        // Additional spec constants for workgroup memory lengths start from ID 3
         for (const auto &pair : workgroupMemoryLengths_) {
-            const auto key = pair.first;
-            const auto value = pair.second;
-            specMap[3 + key] = VkSpecializationMapEntry{3 + key, (3 + key) * 4, sizeof(uint32_t)};
-            specMapContent[3 + key] = value;
+            const auto index = pair.first;
+            const auto length = pair.second;
+            specMap[3 + index] = VkSpecializationMapEntry{3 + index, static_cast<uint32_t>((3 + index) * sizeof(uint32_t)), sizeof(uint32_t)};
+            specMapContent[3 + index] = length;
         }
 
         VkSpecializationInfo specInfo{
@@ -1138,17 +1454,18 @@ namespace easyvk {
         // Allocate command buffers
         VK_CHECK(vkAllocateCommandBuffers(device_.device, &commandBufferAI, &commandBuffer_));
 
-        // Create timestamp query pool
-        // TODO: Device support limits need to be queried.
-        VkQueryPoolCreateInfo queryPoolCreateInfo{
-            .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = 0,
-            .queryType = VK_QUERY_TYPE_TIMESTAMP,
-            .queryCount = 2,
-            .pipelineStatistics = 0
-        };
-        VK_CHECK(vkCreateQueryPool(device_.device, &queryPoolCreateInfo, nullptr, &timestampQueryPool_));
+        // Create timestamp query pool only if timestamps are supported
+        if (device_.supportsTimestamps()) {
+            VkQueryPoolCreateInfo queryPoolCreateInfo{
+                .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = 0,
+                .queryType = VK_QUERY_TYPE_TIMESTAMP,
+                .queryCount = 2,
+                .pipelineStatistics = 0
+            };
+            VK_CHECK(vkCreateQueryPool(device_.device, &queryPoolCreateInfo, nullptr, &timestampQueryPool_));
+        }
 
         initialized_ = true;
     }
@@ -1184,77 +1501,40 @@ namespace easyvk {
             .executableIndex = 0
         };
         auto pfnGetPipelineExecutableStatistics = (PFN_vkGetPipelineExecutableStatisticsKHR) vkGetDeviceProcAddr(device_.device, "vkGetPipelineExecutableStatisticsKHR");
-        uint32_t executableCount = 0;
-        // Get the count of statistics
-        pfnGetPipelineExecutableStatistics(device_.device, &pExecutableInfo, &executableCount, nullptr);
-        std::vector<VkPipelineExecutableStatisticKHR> statistics(executableCount, {VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR});
-        // Get the actual statistics
-        pfnGetPipelineExecutableStatistics(device_.device, &pExecutableInfo, &executableCount, statistics.data());
+        if (pfnGetPipelineExecutableStatistics) {
+            uint32_t executableCount = 0;
+            // Get the count of statistics
+            pfnGetPipelineExecutableStatistics(device_.device, &pExecutableInfo, &executableCount, nullptr);
+            std::vector<VkPipelineExecutableStatisticKHR> statistics(executableCount, {VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR});
+            // Get the actual statistics
+            pfnGetPipelineExecutableStatistics(device_.device, &pExecutableInfo, &executableCount, statistics.data());
 
-        // Output statistics
-        for (const auto &stat : statistics) {
-            switch (stat.format) {
-            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR:
-                stats.push_back(ShaderStatistics{stat.name, stat.description, 0, stat.value.b32});
-                break;
-            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR:
-                stats.push_back(ShaderStatistics{stat.name, stat.description, 1, static_cast<uint64_t>(stat.value.i64)});
-                break;
-            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR:
-                stats.push_back(ShaderStatistics{stat.name, stat.description, 2, stat.value.u64});
-                break;
-            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR:
-                stats.push_back(ShaderStatistics{stat.name, stat.description, 3, static_cast<uint64_t>(stat.value.f64)});
-                break;
-            default:
-                break;
+            // Output statistics
+            for (const auto &stat : statistics) {
+                switch (stat.format) {
+                case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR:
+                    stats.push_back(ShaderStatistics{stat.name, stat.description, 0, stat.value.b32});
+                    break;
+                case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR:
+                    stats.push_back(ShaderStatistics{stat.name, stat.description, 1, static_cast<uint64_t>(stat.value.i64)});
+                    break;
+                case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR:
+                    stats.push_back(ShaderStatistics{stat.name, stat.description, 2, stat.value.u64});
+                    break;
+                case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR:
+                    stats.push_back(ShaderStatistics{stat.name, stat.description, 3, static_cast<uint64_t>(stat.value.f64)});
+                    break;
+                default:
+                    break;
+                }
             }
         }
         return stats;
     }
 
-    void Program::run() {
-        if (!initialized_) {
-            throw std::runtime_error("Program not initialized");
-        }
+    void Program::submitAndWait() {
+        VK_CHECK(vkResetFences(device_.device, 1, &fence_));
 
-        // Start recording command buffer
-        VkCommandBufferBeginInfo beginInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext = nullptr,
-            .flags = 0,
-            .pInheritanceInfo = nullptr
-        };
-        VK_CHECK(vkBeginCommandBuffer(commandBuffer_, &beginInfo));
-
-        // Bind pipeline and descriptor sets
-        vkCmdBindPipeline(commandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
-        vkCmdBindDescriptorSets(commandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr);
-
-        // Bind push constants
-        uint32_t pValues[3] = {0, 0, 0};
-        vkCmdPushConstants(commandBuffer_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushConstantSizeBytes_, &pValues);
-
-        VkMemoryBarrier barrier{
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_HOST_READ_BIT
-        };
-        vkCmdPipelineBarrier(commandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0,
-                             1, &barrier, 0, nullptr, 0, nullptr);
-
-        // Dispatch compute work items
-        vkCmdDispatch(commandBuffer_, numWorkgroups_, 1, 1);
-
-        vkCmdPipelineBarrier(commandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0,
-                             1, &barrier, 0, nullptr, 0, nullptr);
-
-        // End recording command buffer
-        VK_CHECK(vkEndCommandBuffer(commandBuffer_));
-
-        // Define submit info
         VkSubmitInfo submitInfo{
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .pNext = nullptr,
@@ -1267,15 +1547,14 @@ namespace easyvk {
             .pSignalSemaphores = nullptr
         };
 
-        // Submit command buffer to queue, signals fence on completion
         VK_CHECK(vkQueueSubmit(device_.computeQueue, 1, &submitInfo, fence_));
-        // Wait on fence
         VK_CHECK(vkWaitForFences(device_.device, 1, &fence_, VK_TRUE, UINT64_MAX));
-        // Reset fence signal
-        VK_CHECK(vkResetFences(device_.device, 1, &fence_));
+
+        // Reset command buffer for next use
+        VK_CHECK(vkResetCommandBuffer(commandBuffer_, 0));
     }
 
-    float Program::runWithDispatchTiming() {
+    void Program::run() {
         if (!initialized_) {
             throw std::runtime_error("Program not initialized");
         }
@@ -1284,7 +1563,56 @@ namespace easyvk {
         VkCommandBufferBeginInfo beginInfo{
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .pNext = nullptr,
-            .flags = 0,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+            .pInheritanceInfo = nullptr
+        };
+        VK_CHECK(vkBeginCommandBuffer(commandBuffer_, &beginInfo));
+
+        // Bind pipeline and descriptor sets
+        vkCmdBindPipeline(commandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
+        vkCmdBindDescriptorSets(commandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr);
+
+        // Bind push constants
+        vkCmdPushConstants(commandBuffer_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                          pushConstantSizeBytes_, pushConstantData_.data());
+
+        // Dispatch compute work items
+        vkCmdDispatch(commandBuffer_, numWorkgroupsX_, numWorkgroupsY_, numWorkgroupsZ_);
+
+        // Add proper barriers for both host readback AND device-side transfers
+        VkMemoryBarrier barrier{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_HOST_READ_BIT
+        };
+        vkCmdPipelineBarrier(commandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT, 0,
+                             1, &barrier, 0, nullptr, 0, nullptr);
+
+        // End recording command buffer
+        VK_CHECK(vkEndCommandBuffer(commandBuffer_));
+
+        submitAndWait();
+    }
+
+    double Program::runWithDispatchTiming() {
+        if (!initialized_) {
+            throw std::runtime_error("Program not initialized");
+        }
+
+        if (!device_.supportsTimestamps()) {
+            // Fallback: run without timing and return 0
+            run();
+            return 0.0;
+        }
+
+        // Start recording command buffer
+        VkCommandBufferBeginInfo beginInfo{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .pNext = nullptr,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
             .pInheritanceInfo = nullptr
         };
         VK_CHECK(vkBeginCommandBuffer(commandBuffer_, &beginInfo));
@@ -1298,52 +1626,36 @@ namespace easyvk {
                                 pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr);
 
         // Bind push constants
-        uint32_t pValues[3] = {0, 0, 0};
-        vkCmdPushConstants(commandBuffer_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushConstantSizeBytes_, &pValues);
+        vkCmdPushConstants(commandBuffer_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                          pushConstantSizeBytes_, pushConstantData_.data());
 
+        // IMPROVED: Use conservative timestamp stage selection
+        VkPipelineStageFlagBits timestampStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+
+        // Write first timestamp
+        vkCmdWriteTimestamp(commandBuffer_, timestampStage, timestampQueryPool_, 0);
+
+        // Dispatch compute work items
+        vkCmdDispatch(commandBuffer_, numWorkgroupsX_, numWorkgroupsY_, numWorkgroupsZ_);
+
+        // Write second timestamp
+        vkCmdWriteTimestamp(commandBuffer_, timestampStage, timestampQueryPool_, 1);
+
+        // Add proper barriers for both host readback AND device-side transfers
         VkMemoryBarrier barrier{
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
             .pNext = nullptr,
             .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_HOST_READ_BIT
+            .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_HOST_READ_BIT
         };
-        vkCmdPipelineBarrier(commandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0,
+        vkCmdPipelineBarrier(commandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT, 0,
                              1, &barrier, 0, nullptr, 0, nullptr);
-
-        // Write first timestamp
-        vkCmdWriteTimestamp(commandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 0);
-
-        // Dispatch compute work items
-        vkCmdDispatch(commandBuffer_, numWorkgroups_, 1, 1);
-
-        vkCmdPipelineBarrier(commandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0,
-                             1, &barrier, 0, nullptr, 0, nullptr);
-
-        // Write second timestamp
-        vkCmdWriteTimestamp(commandBuffer_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 1);
 
         // End recording command buffer
         VK_CHECK(vkEndCommandBuffer(commandBuffer_));
 
-        // Define submit info
-        VkSubmitInfo submitInfo{
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .pNext = nullptr,
-            .waitSemaphoreCount = 0,
-            .pWaitSemaphores = nullptr,
-            .pWaitDstStageMask = nullptr,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &commandBuffer_,
-            .signalSemaphoreCount = 0,
-            .pSignalSemaphores = nullptr
-        };
-
-        // Submit command buffer to queue, signals fence on completion
-        VK_CHECK(vkQueueSubmit(device_.computeQueue, 1, &submitInfo, fence_));
-        // Wait on fence
-        VK_CHECK(vkWaitForFences(device_.device, 1, &fence_, VK_TRUE, UINT64_MAX));
-        // Reset fence signal
-        VK_CHECK(vkResetFences(device_.device, 1, &fence_));
+        submitAndWait();
 
         // Get timestamp query results
         uint64_t queryResults[2] = {0, 0};
@@ -1357,11 +1669,14 @@ namespace easyvk {
             sizeof(uint64_t),
             VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
 
-        return static_cast<float>(queryResults[1] - queryResults[0]) * device_.properties.limits.timestampPeriod;
+        // IMPROVED: Return double precision nanoseconds
+        return static_cast<double>(queryResults[1] - queryResults[0]) * device_.timestampPeriod();
     }
 
-    void Program::setWorkgroups(uint32_t numWorkgroups) {
-        numWorkgroups_ = numWorkgroups;
+    void Program::setWorkgroups(uint32_t x, uint32_t y, uint32_t z) {
+        numWorkgroupsX_ = x;
+        numWorkgroupsY_ = y;
+        numWorkgroupsZ_ = z;
     }
 
     void Program::setWorkgroupSize(uint32_t workgroupSize) {
@@ -1370,6 +1685,25 @@ namespace easyvk {
 
     void Program::setWorkgroupMemoryLength(uint32_t length, uint32_t index) {
         workgroupMemoryLengths_[index] = length;
+    }
+
+    void Program::setPushConstantsImpl(const void* data, uint32_t bytes, uint32_t offset) {
+        if (bytes % 4 != 0 || offset % 4 != 0) {
+            throw std::invalid_argument("Push constant size and offset must be 4-byte aligned");
+        }
+        if (offset + bytes > pushConstantSizeBytes_) {
+            throw std::invalid_argument("Push constant data exceeds declared size");
+        }
+        if (bytes > device_.maxPushConstantSize() || offset + bytes > device_.maxPushConstantSize()) {
+            throw std::invalid_argument("Push constant data exceeds device limit of " +
+                std::to_string(device_.maxPushConstantSize()) + " bytes");
+        }
+
+        std::memcpy(pushConstantData_.data() + offset, data, bytes);
+    }
+
+    void Program::setPushConstants(const void* data, uint32_t bytes, uint32_t offset) {
+        setPushConstantsImpl(data, bytes, offset);
     }
 
     void Program::teardown() {
