@@ -149,9 +149,16 @@ namespace easyvk {
         return VK_FALSE;
     }
 
-    // Verify SPIR-V magic number for better error messages
+    // Verify SPIR-V magic number and basic structure
     inline bool isValidSPIRV(const std::vector<uint32_t> &code) {
-        return !code.empty() && code[0] == 0x07230203;
+        if (code.empty()) {
+            return false;
+        }
+        if (code[0] != 0x07230203) {
+            return false;
+        }
+        // Basic structure check: SPIR-V requires at least a header
+        return code.size() >= 5;
     }
 
     Instance::Instance(bool enableValidationLayers)
@@ -165,6 +172,25 @@ namespace easyvk {
         VK_CHECK(volkInitialize());
 
         if (enableValidationLayers_) {
+            // Check if validation layer is actually available
+            uint32_t layerCount = 0;
+            vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+            std::vector<VkLayerProperties> availableLayers(layerCount);
+            vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+            bool hasValidationLayer = false;
+            for (const auto &layer : availableLayers) {
+                if (strcmp(layer.layerName, "VK_LAYER_KHRONOS_validation") == 0) {
+                    hasValidationLayer = true;
+                    break;
+                }
+            }
+
+            if (hasValidationLayer) {
+                enabledLayers.push_back("VK_LAYER_KHRONOS_validation");
+            } else {
+                evk_log("Warning: VK_LAYER_KHRONOS_validation not available\n");
+            }
             enabledLayers.push_back("VK_LAYER_KHRONOS_validation");
 
             // Always prefer VK_EXT_debug_utils (VK_EXT_debug_report is deprecated)
@@ -208,10 +234,26 @@ namespace easyvk {
         VkInstanceCreateFlags instanceCreateFlags = 0;
 #endif
 
+        // Setup debug messenger for instance creation if validation is enabled
+        VkDebugUtilsMessengerCreateInfoEXT debugUtilsCreateInfo{};
+        if (enableValidationLayers_ && !enabledExtensions.empty() &&
+            std::find_if(enabledExtensions.begin(), enabledExtensions.end(),
+                        [](const char* ext) { return strcmp(ext, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0; }) != enabledExtensions.end()) {
+            debugUtilsCreateInfo = {
+                .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+                .pNext = nullptr,
+                .flags = 0,
+                .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+                .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+                .pfnUserCallback = debugUtilsCallback,
+                .pUserData = nullptr
+            };
+        }
+
         // Define instance create info
         VkInstanceCreateInfo createInfo{
             .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-            .pNext = nullptr,
+            .pNext = (enableValidationLayers_ && debugUtilsCreateInfo.sType != 0) ? &debugUtilsCreateInfo : nullptr,
             .flags = instanceCreateFlags,
             .pApplicationInfo = &appInfo,
             .enabledLayerCount = static_cast<uint32_t>(enabledLayers.size()),
@@ -512,6 +554,10 @@ namespace easyvk {
 
         // Create device
         VK_CHECK(vkCreateDevice(physicalDevice_, &deviceCreateInfo, nullptr, &device));
+
+        // Load device-level function pointers for better call performance
+        volkLoadDevice(device);
+
         // Get queue handle
         vkGetDeviceQueue(device, computeFamilyId, 0, &computeQueue);
     }
@@ -1060,6 +1106,12 @@ namespace easyvk {
         const auto stream_size = static_cast<unsigned>(fin.tellg());
         fin.seekg(0);
 
+        // SPIR-V files must be multiples of 4 bytes
+        if (stream_size % 4 != 0) {
+            throw std::runtime_error(std::string("SPIR-V file ") + filename +
+                " has invalid size " + std::to_string(stream_size) + " (not multiple of 4 bytes)");
+        }
+
         auto ret = std::vector<std::uint32_t>((stream_size + 3) / 4, 0);
         std::copy(std::istreambuf_iterator<char>(fin), std::istreambuf_iterator<char>(), reinterpret_cast<char *>(ret.data()));
         return ret;
@@ -1067,7 +1119,16 @@ namespace easyvk {
 
     VkShaderModule initShaderModule(Device &device, const std::vector<uint32_t> &spvCode) {
         if (!isValidSPIRV(spvCode)) {
-            throw std::runtime_error("Invalid SPIR-V: missing or incorrect magic number (0x07230203)");
+            if (spvCode.empty()) {
+                throw std::runtime_error("SPIR-V code is empty");
+            }
+            if (spvCode.size() < 5) {
+                throw std::runtime_error("SPIR-V code too short (minimum 5 words required for valid header)");
+            }
+            if (spvCode[0] != 0x07230203) {
+                throw std::runtime_error("Invalid SPIR-V: expected magic number 0x07230203, got 0x" +
+                    std::to_string(spvCode[0]));
+            }
         }
 
         VkShaderModuleCreateInfo createInfo{
