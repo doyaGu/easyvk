@@ -13,7 +13,7 @@ option(USE_EMBEDDED_SPIRV "Embed SPIR-V kernels in executable" OFF)
 set(KERNEL_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/vect-add.cl)
 if (NOT EXISTS ${KERNEL_SOURCE})
     message(FATAL_ERROR "Kernel source ${KERNEL_SOURCE} not found")
-endif()
+endif ()
 
 # Vector addition example executable
 add_executable(vect-add-example
@@ -35,7 +35,7 @@ if (USE_EMBEDDED_SPIRV)
             COMMENT "Generating embedded SPIR-V for vect-add.cl"
             VERBATIM
     )
-else()
+else ()
     message(STATUS "Using file-based SPIR-V loading (.spv file)")
     add_custom_command(TARGET vect-add-example PRE_BUILD
             COMMAND ${CLSPV_EXECUTABLE}
@@ -47,7 +47,7 @@ else()
             COMMENT "Compiling vect-add.cl to SPIR-V"
             VERBATIM
     )
-endif()
+endif ()
 
 target_link_libraries(vect-add-example PRIVATE easyvk)
 
@@ -59,4 +59,4 @@ if (ANDROID)
     set_target_properties(vect-add-example PROPERTIES
             ANDROID_ARM_NEON TRUE
     )
-endif()
+endif ()
