@@ -1462,7 +1462,7 @@ namespace easyvk {
                 setBindings[entry.set].push_back(VkDescriptorSetLayoutBinding{
                     entry.binding,
                     entry.type,
-                    entry.buffers.size(),
+                    static_cast<uint32_t>(entry.buffers.size()),
                     VK_SHADER_STAGE_COMPUTE_BIT,
                     nullptr
                 });
@@ -1477,7 +1477,7 @@ namespace easyvk {
                     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
                     nullptr,
                     0,
-                    bindings.size(),
+                    static_cast<uint32_t>(bindings.size()),
                     bindings.data()
                 };
                 VK_CHECK(vkCreateDescriptorSetLayout(device_->vk(), &dslCreateInfo, nullptr, &setLayouts_[setIndex]));
@@ -1505,7 +1505,7 @@ namespace easyvk {
                 VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                 nullptr,
                 0,
-                setLayouts_.size(),
+                static_cast<uint32_t>(setLayouts_.size()),
                 setLayouts_.data(),
                 pcCfg_.sizeBytes > 0 ? 1u : 0u,
                 pcCfg_.sizeBytes > 0 ? &pushRange : nullptr
@@ -1516,7 +1516,7 @@ namespace easyvk {
             if (!info.bindings.entries.empty()) {
                 std::map<VkDescriptorType, uint32_t> typeCounts;
                 for (const auto &entry : info.bindings.entries) {
-                    typeCounts[entry.type] += entry.buffers.size();
+                    typeCounts[entry.type] += static_cast<uint32_t>(entry.buffers.size());
                 }
 
                 std::vector<VkDescriptorPoolSize> poolSizes;
@@ -1529,8 +1529,8 @@ namespace easyvk {
                     VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
                     nullptr,
                     0,
-                    setLayouts_.size(),
-                    poolSizes.size(),
+                    static_cast<uint32_t>(setLayouts_.size()),
+                    static_cast<uint32_t>(poolSizes.size()),
                     poolSizes.data()
                 };
                 VK_CHECK(vkCreateDescriptorPool(device_->vk(), &poolCreateInfo, nullptr, &dsp_));
@@ -1540,7 +1540,7 @@ namespace easyvk {
                     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                     nullptr,
                     dsp_,
-                    setLayouts_.size(),
+                    static_cast<uint32_t>(setLayouts_.size()),
                     setLayouts_.data()
                 };
                 VK_CHECK(vkAllocateDescriptorSets(device_->vk(), &allocInfo, descriptorSets_.data()));
@@ -1555,7 +1555,7 @@ namespace easyvk {
                         descriptorSets_[entry.set],
                         entry.binding,
                         0,
-                        entry.buffers.size(),
+                        static_cast<uint32_t>(entry.buffers.size()),
                         entry.type,
                         nullptr,
                         entry.buffers.data(),
@@ -1577,7 +1577,7 @@ namespace easyvk {
 
             // Add local memory specialization constants
             for (const auto &mem : info.localMemory) {
-                specEntries.push_back({3 + mem.first, (3 + mem.first) * sizeof(uint32_t), sizeof(uint32_t)});
+                specEntries.push_back({3 + mem.first, static_cast<uint32_t>((3 + mem.first) * sizeof(uint32_t)), sizeof(uint32_t)});
                 if (specData.size() <= 3 + mem.first) {
                     specData.resize(3 + mem.first + 1, 0);
                 }
@@ -1585,7 +1585,7 @@ namespace easyvk {
             }
 
             VkSpecializationInfo specInfo{
-                specEntries.size(),
+                static_cast<uint32_t>(specEntries.size()),
                 specEntries.data(),
                 specData.size() * sizeof(uint32_t),
                 specData.data()
