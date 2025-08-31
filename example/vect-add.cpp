@@ -14,11 +14,12 @@
    limitations under the License.
 */
 
-#include <vector>
-#include <iostream>
-#include <easyvk.h>
 #include <cassert>
 #include <vector>
+#include <iostream>
+#include <fstream>
+
+#include <easyvk.h>
 
 const int size = 1024 * 16;
 
@@ -33,10 +34,15 @@ int main() {
 
 	auto numIters = 1;
 	for (int n = 0; n < numIters; n++) {
-		// Define the buffers to use in the kernel. 
-		auto a = easyvk::Buffer(device, size * sizeof(uint32_t));
-		auto b = easyvk::Buffer(device, size * sizeof(float));
-		auto c = easyvk::Buffer(device, size * sizeof(float));
+		// Define the buffers to use in the kernel.
+		std::vector<easyvk::Buffer> bufs;
+		bufs.emplace_back(device, size * sizeof(uint32_t));
+		bufs.emplace_back(device, size * sizeof(float));
+		bufs.emplace_back(device, size * sizeof(float));
+
+		auto &a = bufs[0];
+		auto &b = bufs[1];
+		auto &c = bufs[2];
 
 		// Write initial values to the buffers.
 		printf("Setting up host buffers...\n");
@@ -54,28 +60,17 @@ int main() {
 		b.store(b_host.data(), size * sizeof(float));
 
 		printf("Setting up program...\n");
-		std::vector<easyvk::Buffer> bufs = {a, b, c};
 
-		// Kernel source code can be loaded in two ways: 
-		// 1. .spv binary read from file at runtime.
-		// 2. .spv binary loaded into the executable at compile time.
-		
 #ifdef USE_EMBEDDED_SPIRV
+		// Use embedded SPIR-V
 		std::vector<uint32_t> spvCode =
-		#include "build/vect-add.cinit"
+#include "vect-add.cinit"
 		;
 		auto program = easyvk::Program(device, spvCode, bufs);
 #else
-		// Use file-based loading when embedded SPIR-V isn't available
-		const char *testFile = "vect-add.spv";
-		// Check if file exists, if not print error and exit gracefully
-		std::ifstream spv_file(testFile, std::ios::binary);
-		if (!spv_file.good()) {
-			printf("Error: SPIR-V file '%s' not found. Please compile the OpenCL kernel first.\n", testFile);
-			return 1;
-		}
-		spv_file.close();
-		auto program = easyvk::Program(device, testFile, bufs);
+		// Use .spv file loading
+		const char *spvFile = "vect-add.spv";
+		auto program = easyvk::Program(device, spvFile, bufs);
 #endif
 
 		program.setWorkgroups(size);
