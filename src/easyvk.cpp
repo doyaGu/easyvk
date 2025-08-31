@@ -210,9 +210,9 @@ namespace easyvk {
 
         // Print out vulkan's instance version
         uint32_t version;
-        auto my_EnumerateInstanceVersion = (PFN_vkEnumerateInstanceVersion) vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkEnumerateInstanceVersion");
-        if (nullptr != my_EnumerateInstanceVersion) {
-            my_EnumerateInstanceVersion(&version);
+        auto enumerateInstanceVersion = (PFN_vkEnumerateInstanceVersion) vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkEnumerateInstanceVersion");
+        if (nullptr != enumerateInstanceVersion) {
+            enumerateInstanceVersion(&version);
         }
     }
 
@@ -302,8 +302,9 @@ namespace easyvk {
         return INVALID_QUEUE_FAMILY;
     }
 
-    Device::Device(easyvk::Instance &instance, VkPhysicalDevice physicalDevice)
+    Device::Device(Instance &instance, VkPhysicalDevice physicalDevice)
         : device(VK_NULL_HANDLE),
+          properties(),
           computeFamilyId(getComputeFamilyId(physicalDevice)),
           computeQueue(VK_NULL_HANDLE),
           supportsAMDShaderStats(false),
@@ -451,7 +452,7 @@ namespace easyvk {
         throw std::runtime_error("Failed to find suitable memory type");
     }
 
-    uint32_t Device::subgroupSize() {
+    uint32_t Device::subgroupSize() const {
         VkPhysicalDeviceSubgroupProperties subgroupProperties{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES,
             .pNext = nullptr
@@ -466,7 +467,7 @@ namespace easyvk {
         return subgroupProperties.subgroupSize;
     }
 
-    const char *Device::vendorName() {
+    const char *Device::vendorName() const {
         return vkVendorName(properties.vendorID);
     }
 
@@ -576,13 +577,13 @@ namespace easyvk {
         }
     }
 
-    void Buffer::createVkBuffer(VkBuffer *buf, VkDeviceMemory *mem, uint64_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props) {
+    void Buffer::createVkBuffer(VkBuffer *buf, VkDeviceMemory *mem, uint64_t sizeBytes, VkBufferUsageFlags usage, VkMemoryPropertyFlags props) {
         // Creating VkBuffer
         VkBufferCreateInfo bufferInfo{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .pNext = nullptr,
             .flags = 0,
-            .size = size,
+            .size = sizeBytes,
             .usage = usage,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
             .queueFamilyIndexCount = 0,
@@ -722,7 +723,7 @@ namespace easyvk {
 
             void *stagingPtr;
             VK_CHECK(vkMapMemory(device.device, stagingMemory, 0, len, 0, &stagingPtr));
-            memcpy(static_cast<char *>(dst) + dstOffset, static_cast<char *>(stagingPtr), len);
+            memcpy(static_cast<char *>(dst) + dstOffset, stagingPtr, len);
             vkUnmapMemory(device.device, stagingMemory);
 
             // Free staging buffer
@@ -732,7 +733,7 @@ namespace easyvk {
             // Map host visible buffer, copy memory, unmap
             void *bufferPtr;
             VK_CHECK(vkMapMemory(device.device, memory, srcOffset, len, 0, &bufferPtr));
-            memcpy(static_cast<char *>(dst) + dstOffset, static_cast<char *>(bufferPtr), len);
+            memcpy(static_cast<char *>(dst) + dstOffset, bufferPtr, len);
             vkUnmapMemory(device.device, memory);
         }
     }
@@ -846,15 +847,15 @@ namespace easyvk {
         writeDescriptorSets.clear();
 
         // Define descriptor buffer info
-        for (size_t i = 0; i < buffers.size(); i++) {
+        for (auto &buffer : buffers) {
             bufferInfos.push_back(VkDescriptorBufferInfo{
-                .buffer = buffers[i].buffer,
+                .buffer = buffer.buffer,
                 .offset = 0,
                 .range = VK_WHOLE_SIZE
             });
         }
 
-        // wow this bug sucked: https://medium.com/@arpytoth/the-dangerous-pointer-to-vector-a139cc42a192
+        // wow, this bug sucked: https://medium.com/@arpytoth/the-dangerous-pointer-to-vector-a139cc42a192
         for (size_t i = 0; i < buffers.size(); i++) {
             writeDescriptorSets.push_back(VkWriteDescriptorSet{
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -871,8 +872,7 @@ namespace easyvk {
         }
     }
 
-    Program::Program(Device &device, const char *filepath, std::vector<Buffer> &buffers,
-                     uint32_t pushConstantSizeBytes)
+    Program::Program(Device &device, const char *filepath, std::vector<Buffer> &buffers, uint32_t pushConstantSizeBytes)
         : buffers_(buffers),
           shaderModule_(initShaderModule(device, filepath)),
           device_(device),
@@ -892,8 +892,7 @@ namespace easyvk {
           tornDown_(false) {
     }
 
-    Program::Program(Device &device, const std::vector<uint32_t> &spvCode, std::vector<Buffer> &buffers,
-                     uint32_t pushConstantSizeBytes)
+    Program::Program(Device &device, const std::vector<uint32_t> &spvCode, std::vector<Buffer> &buffers, uint32_t pushConstantSizeBytes)
         : buffers_(buffers),
           shaderModule_(initShaderModule(device, spvCode)),
           device_(device),
@@ -1152,7 +1151,7 @@ namespace easyvk {
         initialized_ = true;
     }
 
-    std::vector<ShaderStatistics> Program::getShaderStats() {
+    std::vector<ShaderStatistics> Program::getShaderStats() const {
         if (!initialized_) {
             throw std::runtime_error("Program not initialized");
         }
@@ -1298,8 +1297,7 @@ namespace easyvk {
 
         // Bind push constants
         uint32_t pValues[3] = {0, 0, 0};
-        vkCmdPushConstants(commandBuffer_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushConstantSizeBytes_,
-                           &pValues);
+        vkCmdPushConstants(commandBuffer_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushConstantSizeBytes_, &pValues);
 
         VkMemoryBarrier barrier{
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,

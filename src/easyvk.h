@@ -87,8 +87,8 @@ namespace easyvk {
         VkPhysicalDeviceProperties properties;
         uint32_t selectMemory(uint32_t memoryTypeBits, VkMemoryPropertyFlags flags);
         uint32_t computeFamilyId;
-        uint32_t subgroupSize();
-        const char *vendorName();
+        uint32_t subgroupSize() const;
+        const char *vendorName() const;
         VkQueue computeQueue;
         bool supportsAMDShaderStats;
         void teardown();
@@ -126,7 +126,7 @@ namespace easyvk {
     private:
         void validateRange(uint64_t offset, uint64_t len, const char *operation) const;
         void copyInternal(VkBuffer src, VkBuffer dst, uint64_t len, uint64_t srcOffset = 0, uint64_t dstOffset = 0);
-        void createVkBuffer(VkBuffer *buf, VkDeviceMemory *mem, uint64_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags props);
+        void createVkBuffer(VkBuffer *buf, VkDeviceMemory *mem, uint64_t sizeBytes, VkBufferUsageFlags usage, VkMemoryPropertyFlags props);
         bool tornDown_;
     };
 
@@ -144,10 +144,8 @@ namespace easyvk {
      */
     class Program {
     public:
-        Program(Device &device, const char *filepath, std::vector<Buffer> &buffers,
-                uint32_t pushConstantSizeBytes = DEFAULT_PUSH_CONSTANT_SIZE_BYTES);
-        Program(Device &device, const std::vector<uint32_t> &spvCode, std::vector<Buffer> &buffers,
-                uint32_t pushConstantSizeBytes = DEFAULT_PUSH_CONSTANT_SIZE_BYTES);
+        Program(Device &device, const char *filepath, std::vector<Buffer> &buffers, uint32_t pushConstantSizeBytes = DEFAULT_PUSH_CONSTANT_SIZE_BYTES);
+        Program(Device &device, const std::vector<uint32_t> &spvCode, std::vector<Buffer> &buffers, uint32_t pushConstantSizeBytes = DEFAULT_PUSH_CONSTANT_SIZE_BYTES);
         ~Program();
         Program(const Program &) = delete;
         Program &operator=(const Program &) = delete;
@@ -155,7 +153,7 @@ namespace easyvk {
         Program &operator=(Program &&other) noexcept;
 
         void initialize(const char *entryPoint = "main", VkPipelineShaderStageCreateFlags pipelineFlags = 0);
-        std::vector<ShaderStatistics> getShaderStats();
+        std::vector<ShaderStatistics> getShaderStats() const;
         void run();
         float runWithDispatchTiming();
         void setWorkgroups(uint32_t numWorkgroups);
