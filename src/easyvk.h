@@ -18,24 +18,29 @@
 // -------------------------------------------------------------------
 // Design:
 //  - Flat, developer-friendly API: *Info structs, no nested classes.
-//  - Frozen creation-time invariants (pipeline baked in constructor).
+//  - Configurable creation-time behavior (portability, validation, allocators).
 //  - RAII mapping with correct non-coherent alignment + clamping.
 //  - Safe default barrier (Compute -> Host) in dispatch() for readback.
 //  - Robustness toggles (robustBufferAccess / VK_EXT_robustness2).
 //  - Programmatic validation / debug utils helpers.
+//  - Optional SPIR-V validation and VMA integration.
 //
 // Build: C++11, depends on <volk.h>. Define VK_NO_PROTOTYPES in your build.
-// License: MIT (or match your project)
 
 #ifndef EASYVK_H
 #define EASYVK_H
 
+#include <cstdint>
+#include <utility>
 #include <vector>
 #include <string>
-#include <cstdint>
 #include <stdexcept>
 
 #include <volk.h>
+
+#ifdef EASYVK_USE_VMA
+#include <vk_mem_alloc.h>
+#endif
 
 namespace easyvk {
     // -------- Version ------------------------------------------------------------
@@ -49,24 +54,25 @@ namespace easyvk {
     // Default-on convenience toggles (implementations soft-fail if unsupported):
     // #define EASYVK_DEFAULT_ENABLE_DEBUG_UTILS 1
     // #define EASYVK_DEFAULT_ENABLE_ROBUSTNESS2 1
+    // #define EASYVK_ENABLE_PORTABILITY_ENUMERATION 1
+    // #define EASYVK_USE_SPIRV_TOOLS 1
+    // #define EASYVK_USE_VMA 1
 
 #ifdef EASYVK_NO_EXCEPTIONS
     struct Result {
         bool ok;
         std::string message;
 
-        Result(bool o = true, const std::string &m = std::string()) : ok(o), message(m) {
-        }
-
-        operator bool() const { return ok; }
+        explicit Result(bool o = true, std::string m = std::string()) : ok(o), message(std::move(m)) {}
+        explicit operator bool() const { return ok; }
     };
 #endif
 
     // -------- Exception class ---------------------------------------------------
     class VulkanError : public std::runtime_error {
     public:
-        VulkanError(VkResult result, const std::string &message, const std::string &file, int line)
-            : std::runtime_error(message), result_(result), file_(file), line_(line) {}
+        VulkanError(VkResult result, const std::string &message, std::string file, int line)
+            : std::runtime_error(message), result_(result), file_(std::move(file)), line_(line) {}
 
         VkResult getResult() const { return result_; }
         const std::string &getFile() const { return file_; }
@@ -77,6 +83,26 @@ namespace easyvk {
         std::string file_;
         int line_;
     };
+
+    // -------- Unified error handling macros -------------------------------------
+    const char *vkResultString(VkResult res);
+
+#ifdef EASYVK_NO_EXCEPTIONS
+#  define EVK_FAIL(msg) do { lastError_ = (msg); return false; } while(0)
+#  define EVK_FAIL_VOID(msg) do { lastError_ = (msg); return; } while(0)
+#else
+#  define EVK_FAIL(msg) do { throw std::runtime_error(msg); } while(0)
+#  define EVK_FAIL_VOID(msg) do { throw std::runtime_error(msg); } while(0)
+#endif
+
+#define EVK_CHECK(call, msg) \
+    do { \
+        VkResult _r = (call); \
+        if (_r != VK_SUCCESS) { \
+            std::string _m = std::string(msg) + " (" + vkResultString(_r) + ")"; \
+            EVK_FAIL(_m); \
+        } \
+    } while(0)
 
     // -------- Small enums / handles ---------------------------------------------
     struct SubmitHandle {
@@ -92,10 +118,11 @@ namespace easyvk {
     enum class BufferUsage { Storage, Uniform, Staging, TransferSrc, TransferDst };
 
     // -------- Instance -----------------------------------------------------------
-    struct InstanceInfo {
+    struct InstanceCreateInfo {
         bool enableValidationLayers;               // request VK_LAYER_KHRONOS_validation
         bool enableDebugUtils;                     // request VK_EXT_debug_utils + messenger
         bool enableLayerSettings;                  // request VK_EXT_layer_settings
+        bool enablePortabilityEnumeration;         // request VK_KHR_portability_enumeration
         const char *applicationName;               // optional
         uint32_t applicationVersion;               // optional
         uint32_t apiVersion;                       // e.g. VK_API_VERSION_1_3
@@ -104,7 +131,7 @@ namespace easyvk {
         // Optional: programmatic layer settings for VK_EXT_layer_settings
         std::vector<VkLayerSettingEXT> layerSettings; // if non-empty and extension present, chained into pNext
 
-        InstanceInfo()
+        InstanceCreateInfo()
             : enableValidationLayers(false),
 #if defined(EASYVK_DEFAULT_ENABLE_DEBUG_UTILS)
               enableDebugUtils(true),
@@ -112,16 +139,22 @@ namespace easyvk {
               enableDebugUtils(false),
 #endif
               enableLayerSettings(false),
+              enablePortabilityEnumeration(
+#ifdef __APPLE__
+                  true  // sane default on macOS
+#else
+                  false
+#endif
+              ),
               applicationName("easyvk"),
               applicationVersion(1),
-              apiVersion(VK_API_VERSION_1_3) {
-        }
+              apiVersion(VK_API_VERSION_1_3) {}
     };
 
     class Instance {
     public:
         Instance(); // defaults (no validation)
-        explicit Instance(const InstanceInfo &info);
+        explicit Instance(const InstanceCreateInfo &info);
 #ifndef EASYVK_NO_EXCEPTIONS
         explicit Instance(bool enableValidationLayers);
 #endif
@@ -149,35 +182,33 @@ namespace easyvk {
         bool debugUtilsEnabled_;
         bool tornDown_;
 #ifdef EASYVK_NO_EXCEPTIONS
-        std::string lastError_;
+        mutable std::string lastError_;
 #endif
 
         void teardown();
     };
 
     // -------- Device -------------------------------------------------------------
-    struct DeviceInfo {
+    struct DeviceCreateInfo {
         int preferredIndex;            // -1: pick best discrete > integrated > cpu
         bool enableRobustBufferAccess; // core robustBufferAccess
         bool enableRobustness2;        // VK_EXT_robustness2 features (if supported)
         bool enableDebugMarkers;       // VK_EXT_debug_marker (optional)
 
-        DeviceInfo()
+        DeviceCreateInfo()
             : preferredIndex(-1),
+              enableRobustBufferAccess(true),
 #ifdef EASYVK_DEFAULT_ENABLE_ROBUSTNESS2
-              enableRobustBufferAccess(true),
-                  enableRobustness2(true),
+              enableRobustness2(true),
 #else
-              enableRobustBufferAccess(true),
               enableRobustness2(false),
 #endif
-              enableDebugMarkers(false) {
-        }
+              enableDebugMarkers(false) {}
     };
 
     class Device {
     public:
-        explicit Device(Instance &inst, const DeviceInfo &info);
+        explicit Device(Instance &inst, const DeviceCreateInfo &info);
 #ifndef EASYVK_NO_EXCEPTIONS
         explicit Device(Instance &inst, int preferredIndex = -1);
 #endif
@@ -207,6 +238,10 @@ namespace easyvk {
         bool supportsTimestamps() const { return supportsTimestamps_; }
         double timestampPeriod() const { return timestampPeriod_; }
 
+#ifdef EASYVK_USE_VMA
+        VmaAllocator allocator() const { return allocator_; }
+#endif
+
 #ifdef EASYVK_NO_EXCEPTIONS
         const std::string &lastError() const { return lastError_; }
 #endif
@@ -226,8 +261,12 @@ namespace easyvk {
         double timestampPeriod_;
         bool tornDown_;
 
+#ifdef EASYVK_USE_VMA
+        VmaAllocator allocator_;
+#endif
+
 #ifdef EASYVK_NO_EXCEPTIONS
-        std::string lastError_;
+        mutable std::string lastError_;
 #endif
 
         void teardown();
@@ -237,12 +276,12 @@ namespace easyvk {
     };
 
     // -------- Buffer -------------------------------------------------------------
-    struct BufferInfo {
+    struct BufferCreateInfo {
         VkDeviceSize sizeBytes;
         BufferUsage usage;
         HostAccess host;
 
-        explicit BufferInfo(VkDeviceSize s = 0, BufferUsage u = BufferUsage::Storage, HostAccess h = HostAccess::None)
+        explicit BufferCreateInfo(VkDeviceSize s = 0, BufferUsage u = BufferUsage::Storage, HostAccess h = HostAccess::None)
             : sizeBytes(s), usage(u), host(h) {}
     };
 
@@ -288,10 +327,10 @@ namespace easyvk {
 
     class Buffer {
     public:
-        Buffer(Device &dev, const BufferInfo &info);
+        Buffer(Device &dev, const BufferCreateInfo &info);
 
         Buffer(Device &dev, VkDeviceSize sizeBytes, BufferUsage usage, HostAccess host)
-            : Buffer(dev, BufferInfo(sizeBytes, usage, host)) {}
+            : Buffer(dev, BufferCreateInfo(sizeBytes, usage, host)) {}
 
         ~Buffer() noexcept;
 
@@ -328,8 +367,12 @@ namespace easyvk {
         HostAccess hostAccess_;
         bool tornDown_;
 
+#ifdef EASYVK_USE_VMA
+        VmaAllocation allocation_;
+#endif
+
 #ifdef EASYVK_NO_EXCEPTIONS
-        std::string lastError_;
+        mutable std::string lastError_;
 #endif
 
         void teardown();
@@ -344,28 +387,43 @@ namespace easyvk {
 
     // -------- Compute pipeline (program) -----------------------------------------
     struct ComputeBindingEntry {
+        uint32_t set;          // descriptor set index (multiple sets supported)
         uint32_t binding;
         VkDescriptorType type; // VK_DESCRIPTOR_TYPE_STORAGE_BUFFER or UNIFORM_BUFFER
-        VkBuffer buffer;
-        VkDeviceSize offset; // must satisfy device min alignment for the type
-        VkDeviceSize range;  // VK_WHOLE_SIZE allowed (resolved at init)
+        std::vector<VkDescriptorBufferInfo> buffers; // support for descriptor arrays
+
+        // Helper constructors for single buffer bindings (backward compatibility)
+        ComputeBindingEntry(uint32_t b, VkDescriptorType t, VkBuffer buf, VkDeviceSize offset, VkDeviceSize range)
+            : set(0), binding(b), type(t) {
+            buffers.push_back({buf, offset, range});
+        }
+
+        ComputeBindingEntry(uint32_t s, uint32_t b, VkDescriptorType t, const std::vector<VkDescriptorBufferInfo> &bufs)
+            : set(s), binding(b), type(t), buffers(bufs) {}
     };
 
     struct ComputeBindings {
         std::vector<ComputeBindingEntry> entries;
 
+        // Single-buffer methods (use set 0)
         void addStorage(uint32_t binding, const Buffer &buf, VkDeviceSize offset = 0, VkDeviceSize range = VK_WHOLE_SIZE);
         void addUniform(uint32_t binding, const Buffer &buf, VkDeviceSize offset = 0, VkDeviceSize range = VK_WHOLE_SIZE);
+
+        // Methods for multiple sets and descriptor arrays
+        void addStorageArray(uint32_t set, uint32_t binding, const std::vector<Buffer*> &buffers);
+        void addUniformArray(uint32_t set, uint32_t binding, const std::vector<Buffer*> &buffers);
+        void addStorageToSet(uint32_t set, uint32_t binding, const Buffer &buf, VkDeviceSize offset = 0, VkDeviceSize range = VK_WHOLE_SIZE);
+        void addUniformToSet(uint32_t set, uint32_t binding, const Buffer &buf, VkDeviceSize offset = 0, VkDeviceSize range = VK_WHOLE_SIZE);
     };
 
-    struct ComputeProgramInfo {
+    struct ComputeProgramCreateInfo {
         // SPIR-V (uint32_t words) of the compute shader.
         const std::vector<uint32_t> *spirv;
 
-        // Specialization constants for local workgroup size (≥1).
+        // Specialization constants for local workgroup size (>=1).
         uint32_t localX, localY, localZ;
 
-        // Optional: (index, bytes) declarations for threadgroup (shared) memory.
+        // Optional: (index, bytes) declarations for thread-group (shared) memory.
         std::vector<std::pair<uint32_t, uint32_t>> localMemory;
 
         // Push-constant capacity in bytes (must be >0, multiple of 4, <= maxPushConstantsSize).
@@ -377,7 +435,7 @@ namespace easyvk {
         // Resource bindings snapshot (copied at initialization).
         ComputeBindings bindings;
 
-        ComputeProgramInfo() : spirv(nullptr), localX(1), localY(1), localZ(1), pushConstantBytes(0), entryPointName("main") {}
+        ComputeProgramCreateInfo() : spirv(nullptr), localX(1), localY(1), localZ(1), pushConstantBytes(0), entryPointName("main") {}
     };
 
     // -------- Push constant configuration ---------------------------------------
@@ -392,7 +450,7 @@ namespace easyvk {
     class ComputeProgram {
     public:
         ComputeProgram(); // invalid placeholder
-        ComputeProgram(Device &dev, const ComputeProgramInfo &info);
+        ComputeProgram(Device &dev, const ComputeProgramCreateInfo &info);
         ~ComputeProgram() noexcept;
 
         ComputeProgram(const ComputeProgram &) = delete;
@@ -403,13 +461,13 @@ namespace easyvk {
         // Runtime mutables:
         //  - setPushConstantConfig(...) : configure push constant layout
         //  - setPushConstants(...) : data within declared capacity; 4-byte aligned
-        //  - setWorkgroups(...)    : dispatch counts (≥1)
+        //  - setWorkgroups(...)    : dispatch counts (>=1)
         void setPushConstantConfig(const PushConstantConfig &config);
         void setPushConstants(const void *data, uint32_t bytes, uint32_t offset = 0);
 
         template <typename T>
         void setPushConstants(const T &pod, uint32_t offset = 0) {
-            setPushConstants(&pod, (uint32_t) sizeof(T), offset);
+            setPushConstants(&pod, static_cast<uint32_t>(sizeof(T)), offset);
         }
 
         void setWorkgroups(uint32_t x, uint32_t y = 1, uint32_t z = 1);
@@ -424,17 +482,21 @@ namespace easyvk {
         bool supportsTimestamps() const;
         double dispatchWithTimingNs();
 
+        // Async timing support
+        SubmitHandle dispatchWithTimingAsync(); // returns fence; query IDs are fixed at {0,1}
+        bool tryGetTimingNs(double& outNs);     // non-blocking; returns false if not ready
+
 #ifdef EASYVK_NO_EXCEPTIONS
         const std::string &lastError() const { return lastError_; }
 #endif
 
     private:
         Device *device_;
+        std::vector<VkDescriptorSetLayout> setLayouts_; // support multiple sets
         VkPipelineLayout layout_;
         VkPipeline pipeline_;
-        VkDescriptorSetLayout dsl_;
         VkDescriptorPool dsp_;
-        VkDescriptorSet ds_;
+        std::vector<VkDescriptorSet> descriptorSets_; // multiple sets
         VkShaderModule shader_;
         VkCommandPool cmdPool_;
         VkCommandBuffer cmdBuf_;
@@ -449,12 +511,17 @@ namespace easyvk {
         bool initialized_;
         bool tornDown_;
 
+        // Timestamp state for async operations
+        bool timestampInFlight_;
+        uint64_t lastTimestamps_[2];
+
 #ifdef EASYVK_NO_EXCEPTIONS
-        std::string lastError_;
+        mutable std::string lastError_;
 #endif
 
         void teardown();
         void submitAndWait(bool addHostBarrier);
+        SubmitHandle submitAsync(bool addHostBarrier, bool enableTimestamps = false);
     };
 
     // -------- Utility functions -------------------------------------------------
@@ -462,12 +529,22 @@ namespace easyvk {
     const char *vkDeviceType(VkPhysicalDeviceType type);
     std::vector<uint32_t> readSpirv(const char *filename);
 
+    // SPIR-V validation (optional, requires SPIRV-Tools)
+    bool isValidSPIRV(const std::vector<uint32_t> &code);
+#ifdef EASYVK_USE_SPIRV_TOOLS
+    bool validateSPIRV(const std::vector<uint32_t> &code, std::string &errorMessage);
+#endif
+
     // Alignment utilities
     VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment);
     VkDeviceSize alignDown(VkDeviceSize value, VkDeviceSize alignment);
 
     // Debug naming utility (requires debug utils enabled)
     void setObjectName(Instance &inst, Device &dev, uint64_t objectHandle, VkObjectType type, const char *name);
+
+    // Device selection utilities
+    uint32_t findComputeQueueFamily(VkPhysicalDevice physicalDevice);
+    VkPhysicalDevice selectBestDevice(const std::vector<VkPhysicalDevice> &devices, int preferredIndex = -1);
 } // namespace easyvk
 
 // Macro for error checking

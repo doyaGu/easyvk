@@ -28,6 +28,10 @@
 #include <android/log.h>
 #endif
 
+#ifdef EASYVK_USE_SPIRV_TOOLS
+#include <spirv-tools/libspirv.hpp>
+#endif
+
 // Simple logging function
 void evk_log(const char *fmt, ...) {
     va_list args;
@@ -40,55 +44,55 @@ void evk_log(const char *fmt, ...) {
     va_end(args);
 }
 
-// VkResult to string conversion
-inline const char *vkResultString(VkResult res) {
-    switch (res) {
-    // 1.0
-    case VK_SUCCESS: return "VK_SUCCESS";
-    case VK_NOT_READY: return "VK_NOT_READY";
-    case VK_TIMEOUT: return "VK_TIMEOUT";
-    case VK_EVENT_SET: return "VK_EVENT_SET";
-    case VK_EVENT_RESET: return "VK_EVENT_RESET";
-    case VK_INCOMPLETE: return "VK_INCOMPLETE";
-    case VK_ERROR_OUT_OF_HOST_MEMORY: return "VK_ERROR_OUT_OF_HOST_MEMORY";
-    case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
-    case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED";
-    case VK_ERROR_DEVICE_LOST: return "VK_ERROR_DEVICE_LOST";
-    case VK_ERROR_MEMORY_MAP_FAILED: return "VK_ERROR_MEMORY_MAP_FAILED";
-    case VK_ERROR_LAYER_NOT_PRESENT: return "VK_ERROR_LAYER_NOT_PRESENT";
-    case VK_ERROR_EXTENSION_NOT_PRESENT: return "VK_ERROR_EXTENSION_NOT_PRESENT";
-    case VK_ERROR_FEATURE_NOT_PRESENT: return "VK_ERROR_FEATURE_NOT_PRESENT";
-    case VK_ERROR_INCOMPATIBLE_DRIVER: return "VK_ERROR_INCOMPATIBLE_DRIVER";
-    case VK_ERROR_TOO_MANY_OBJECTS: return "VK_ERROR_TOO_MANY_OBJECTS";
-    case VK_ERROR_FORMAT_NOT_SUPPORTED: return "VK_ERROR_FORMAT_NOT_SUPPORTED";
-    case VK_ERROR_FRAGMENTED_POOL: return "VK_ERROR_FRAGMENTED_POOL";
-    case VK_ERROR_UNKNOWN: return "VK_ERROR_UNKNOWN";
-    // 1.1
-    case VK_ERROR_OUT_OF_POOL_MEMORY: return "VK_ERROR_OUT_OF_POOL_MEMORY";
-    case VK_ERROR_INVALID_EXTERNAL_HANDLE: return "VK_ERROR_INVALID_EXTERNAL_HANDLE";
-    // 1.2
-    case VK_ERROR_FRAGMENTATION: return "VK_ERROR_FRAGMENTATION";
-    case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS: return "VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS";
-    // 1.3
-    case VK_PIPELINE_COMPILE_REQUIRED: return "VK_PIPELINE_COMPILE_REQUIRED";
-    default: return "UNKNOWN_ERROR";
-    }
-}
-
-// Returns readable vendor name from vendorID
-inline const char *vkVendorName(uint32_t vid) {
-    switch (vid) {
-    case 0x10DE: return "NVIDIA";
-    case 0x1002: return "AMD";
-    case 0x8086: return "Intel";
-    case 0x106B: return "Apple";
-    case 0x13B5: return "ARM";
-    case 0x5143: return "Qualcomm";
-    default: return "UNKNOWN";
-    }
-}
-
 namespace easyvk {
+    // -------- VkResult to string conversion -------------------------------------
+    const char *vkResultString(VkResult res) {
+        switch (res) {
+        // 1.0
+        case VK_SUCCESS: return "VK_SUCCESS";
+        case VK_NOT_READY: return "VK_NOT_READY";
+        case VK_TIMEOUT: return "VK_TIMEOUT";
+        case VK_EVENT_SET: return "VK_EVENT_SET";
+        case VK_EVENT_RESET: return "VK_EVENT_RESET";
+        case VK_INCOMPLETE: return "VK_INCOMPLETE";
+        case VK_ERROR_OUT_OF_HOST_MEMORY: return "VK_ERROR_OUT_OF_HOST_MEMORY";
+        case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+        case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED";
+        case VK_ERROR_DEVICE_LOST: return "VK_ERROR_DEVICE_LOST";
+        case VK_ERROR_MEMORY_MAP_FAILED: return "VK_ERROR_MEMORY_MAP_FAILED";
+        case VK_ERROR_LAYER_NOT_PRESENT: return "VK_ERROR_LAYER_NOT_PRESENT";
+        case VK_ERROR_EXTENSION_NOT_PRESENT: return "VK_ERROR_EXTENSION_NOT_PRESENT";
+        case VK_ERROR_FEATURE_NOT_PRESENT: return "VK_ERROR_FEATURE_NOT_PRESENT";
+        case VK_ERROR_INCOMPATIBLE_DRIVER: return "VK_ERROR_INCOMPATIBLE_DRIVER";
+        case VK_ERROR_TOO_MANY_OBJECTS: return "VK_ERROR_TOO_MANY_OBJECTS";
+        case VK_ERROR_FORMAT_NOT_SUPPORTED: return "VK_ERROR_FORMAT_NOT_SUPPORTED";
+        case VK_ERROR_FRAGMENTED_POOL: return "VK_ERROR_FRAGMENTED_POOL";
+        case VK_ERROR_UNKNOWN: return "VK_ERROR_UNKNOWN";
+        // 1.1
+        case VK_ERROR_OUT_OF_POOL_MEMORY: return "VK_ERROR_OUT_OF_POOL_MEMORY";
+        case VK_ERROR_INVALID_EXTERNAL_HANDLE: return "VK_ERROR_INVALID_EXTERNAL_HANDLE";
+        // 1.2
+        case VK_ERROR_FRAGMENTATION: return "VK_ERROR_FRAGMENTATION";
+        case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS: return "VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS";
+        // 1.3
+        case VK_PIPELINE_COMPILE_REQUIRED: return "VK_PIPELINE_COMPILE_REQUIRED";
+        default: return "UNKNOWN_ERROR";
+        }
+    }
+
+    // Returns readable vendor name from vendorID
+    const char *vkVendorName(uint32_t vid) {
+        switch (vid) {
+        case 0x10DE: return "NVIDIA";
+        case 0x1002: return "AMD";
+        case 0x8086: return "Intel";
+        case 0x106B: return "Apple";
+        case 0x13B5: return "ARM";
+        case 0x5143: return "Qualcomm";
+        default: return "UNKNOWN";
+        }
+    }
+
     // -------- Error handling utilities ------------------------------------------
     void vkCheck(VkResult result, const char *file, int line) {
         if (result != VK_SUCCESS) {
@@ -113,7 +117,6 @@ namespace easyvk {
     }
 
     // -------- Alignment utilities -----------------------------------------------
-    // Safe rounding helpers that work for any alignment >= 1 (not just powers of two).
     VkDeviceSize alignDown(VkDeviceSize value, VkDeviceSize alignment) {
         if (alignment == 0) return value;
         return (value / alignment) * alignment;
@@ -136,16 +139,30 @@ namespace easyvk {
     }
 
     // -------- SPIR-V validation -------------------------------------------------
-    inline bool isValidSPIRV(const std::vector<uint32_t> &code) {
+    bool isValidSPIRV(const std::vector<uint32_t> &code) {
         if (code.empty()) return false;
         if (code[0] != 0x07230203) return false;
         return code.size() >= 5;
     }
 
-    // -------- Instance implementation -------------------------------------------
-    Instance::Instance() : Instance(InstanceInfo{}) {}
+#ifdef EASYVK_USE_SPIRV_TOOLS
+    bool validateSPIRV(const std::vector<uint32_t> &code, std::string &errorMessage) {
+        spv_target_env env = SPV_ENV_VULKAN_1_3;
+        spvtools::SpirvTools tools(env);
 
-    Instance::Instance(const InstanceInfo &info)
+        tools.SetMessageConsumer([&errorMessage](spv_message_level_t level, const char *source,
+                                                 const spv_position_t &position, const char *message) {
+            errorMessage = std::string("line ") + std::to_string(position.index) + ": " + message;
+        });
+
+        return tools.Validate(code.data(), code.size());
+    }
+#endif
+
+    // -------- Instance implementation -------------------------------------------
+    Instance::Instance() : Instance(InstanceCreateInfo{}) {}
+
+    Instance::Instance(const InstanceCreateInfo &info)
         : instance_(VK_NULL_HANDLE),
           debugMessenger_(VK_NULL_HANDLE),
           validationEnabled_(info.enableValidationLayers),
@@ -241,7 +258,24 @@ namespace easyvk {
         // Avoid duplicate entries
         dedupCStrs(enabledExtensions);
         dedupCStrs(enabledLayers);
-        // (On Apple, VK_KHR_portability_enumeration is appended later only if available)
+
+        // Configurable portability enumeration support
+        VkInstanceCreateFlags instanceCreateFlags = 0;
+        bool wantPortability =
+#ifdef EASYVK_ENABLE_PORTABILITY_ENUMERATION
+                true
+#else
+                info.enablePortabilityEnumeration
+#endif
+            ;
+
+        if (wantPortability && hasPortabilityEnum) {
+            enabledExtensions.push_back("VK_KHR_portability_enumeration");
+            dedupCStrs(enabledExtensions);
+            instanceCreateFlags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+        } else if (wantPortability && !hasPortabilityEnum) {
+            evk_log("Warning: VK_KHR_portability_enumeration not available on this platform\n");
+        }
 
         VkApplicationInfo appInfo{
             VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -253,20 +287,6 @@ namespace easyvk {
             info.apiVersion
         };
 
-#ifdef __APPLE__
-        // On Apple/MoltenVK, portability enumeration is required for device enumeration
-        VkInstanceCreateFlags instanceCreateFlags = 0;
-        if (hasPortabilityEnum) {
-            enabledExtensions.push_back("VK_KHR_portability_enumeration");
-            dedupCStrs(enabledExtensions);
-            instanceCreateFlags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-        } else {
-            evk_log("Warning: VK_KHR_portability_enumeration not available on this platform\n");
-        }
-#else
-        VkInstanceCreateFlags instanceCreateFlags = 0;
-#endif
-
         // Setup debug messenger for instance creation if validation is enabled
         VkDebugUtilsMessengerCreateInfoEXT debugUtilsCreateInfo{};
         if (debugUtilsEnabled_) {
@@ -274,15 +294,14 @@ namespace easyvk {
                 VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
                 nullptr,
                 0,
-                VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-                VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+                VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
                 debugUtilsCallback,
                 nullptr
             };
         }
+
         // Optional layer settings chain
         VkLayerSettingsCreateInfoEXT layerSettingsCI{};
         const void *pNextHead = nullptr;
@@ -316,9 +335,7 @@ namespace easyvk {
         volkLoadInstance(instance_);
 
         if (debugUtilsEnabled_) {
-            // Now available directly via volk
-            VK_CHECK(vkCreateDebugUtilsMessengerEXT(
-                instance_, &debugUtilsCreateInfo, nullptr, &debugMessenger_));
+            VK_CHECK(vkCreateDebugUtilsMessengerEXT(instance_, &debugUtilsCreateInfo, nullptr, &debugMessenger_));
         }
     }
 
@@ -333,7 +350,7 @@ namespace easyvk {
           debugUtilsEnabled_(false),
 #endif
           tornDown_(false) {
-        InstanceInfo info;
+        InstanceCreateInfo info;
         info.enableValidationLayers = enableValidationLayers;
         *this = Instance(info);
     }
@@ -453,14 +470,10 @@ namespace easyvk {
 
             int score = 0;
             switch (props.deviceType) {
-            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: score = 3;
-                break;
-            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: score = 2;
-                break;
-            case VK_PHYSICAL_DEVICE_TYPE_CPU: score = 1;
-                break;
-            default: score = 0;
-                break;
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: score = 3; break;
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: score = 2; break;
+            case VK_PHYSICAL_DEVICE_TYPE_CPU: score = 1; break;
+            default: score = 0; break;
             }
 
             if (score > bestScore) {
@@ -472,7 +485,7 @@ namespace easyvk {
         return bestDevice;
     }
 
-    Device::Device(Instance &inst, const DeviceInfo &info)
+    Device::Device(Instance &inst, const DeviceCreateInfo &info)
         : instance_(&inst),
           phys_(VK_NULL_HANDLE),
           device_(VK_NULL_HANDLE),
@@ -485,27 +498,21 @@ namespace easyvk {
           debugMarkersEnabled_(false),
           supportsTimestamps_(false),
           timestampPeriod_(0.0),
-          tornDown_(false) {
+          tornDown_(false)
+#ifdef EASYVK_USE_VMA
+          , allocator_(VK_NULL_HANDLE)
+#endif
+    {
         std::vector<VkPhysicalDevice> devices = inst.physicalDevices();
         phys_ = selectBestDevice(devices, info.preferredIndex);
 
         if (phys_ == VK_NULL_HANDLE) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "No suitable physical device found";
-            return;
-#else
-            throw std::runtime_error("No suitable physical device found");
-#endif
+            EVK_FAIL("No suitable physical device found");
         }
 
         queueFamilyIndex_ = findComputeQueueFamily(phys_);
         if (queueFamilyIndex_ == UINT32_MAX) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "No compute queue family found";
-            return;
-#else
-            throw std::runtime_error("No compute queue family found");
-#endif
+            EVK_FAIL("No compute queue family found");
         }
 
         // Get device properties and limits
@@ -520,16 +527,15 @@ namespace easyvk {
         vkGetPhysicalDeviceQueueFamilyProperties(phys_, &queueFamilyCount, queueFamilies.data());
 
         if (queueFamilyIndex_ < queueFamilies.size()) {
-            supportsTimestamps_ = (queueFamilies[queueFamilyIndex_].timestampValidBits > 0) &&
-                (props.limits.timestampPeriod > 0);
+            supportsTimestamps_ = (queueFamilies[queueFamilyIndex_].timestampValidBits > 0) && (props.limits.timestampPeriod > 0);
             timestampPeriod_ = static_cast<double>(props.limits.timestampPeriod);
         }
 
         // Check for extension support
-        uint32_t extensionCount;
-        vkEnumerateDeviceExtensionProperties(phys_, nullptr, &extensionCount, nullptr);
-        std::vector<VkExtensionProperties> extensions(extensionCount);
-        vkEnumerateDeviceExtensionProperties(phys_, nullptr, &extensionCount, extensions.data());
+        uint32_t deviceExtensionCount;
+        vkEnumerateDeviceExtensionProperties(phys_, nullptr, &deviceExtensionCount, nullptr);
+        std::vector<VkExtensionProperties> extensions(deviceExtensionCount);
+        vkEnumerateDeviceExtensionProperties(phys_, nullptr, &deviceExtensionCount, extensions.data());
 
         std::vector<const char *> enabledExtensions;
         bool hasRobustness2 = false;
@@ -548,8 +554,6 @@ namespace easyvk {
                     debugMarkersEnabled_ = true;
                 }
             } else if (strcmp(extension.extensionName, VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME) == 0) {
-                // Safe to enable; on Vulkan 1.3 this requirement is satisfied by core,
-                // and drivers may or may not list the extension. If it's listed, enable it.
                 enabledExtensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
             }
         }
@@ -618,6 +622,17 @@ namespace easyvk {
             queueFamilyIndex_
         };
         VK_CHECK(vkCreateCommandPool(device_, &poolInfo, nullptr, &transferCmdPool_));
+
+#ifdef EASYVK_USE_VMA
+        // Initialize VMA allocator
+        VmaAllocatorCreateInfo vmaCreateInfo{};
+        vmaCreateInfo.instance = inst.vk();
+        vmaCreateInfo.physicalDevice = phys_;
+        vmaCreateInfo.device = device_;
+        vmaCreateInfo.vulkanApiVersion = info.apiVersion;
+
+        VK_CHECK(vmaCreateAllocator(&vmaCreateInfo, &allocator_));
+#endif
     }
 
 #ifndef EASYVK_NO_EXCEPTIONS
@@ -635,7 +650,7 @@ namespace easyvk {
           supportsTimestamps_(false),
           timestampPeriod_(0.0),
           tornDown_(false) {
-        DeviceInfo info;
+        DeviceCreateInfo info;
         info.preferredIndex = preferredIndex;
         *this = Device(inst, info);
     }
@@ -654,12 +669,19 @@ namespace easyvk {
           debugMarkersEnabled_(other.debugMarkersEnabled_),
           supportsTimestamps_(other.supportsTimestamps_),
           timestampPeriod_(other.timestampPeriod_),
-          tornDown_(other.tornDown_) {
+          tornDown_(other.tornDown_)
+#ifdef EASYVK_USE_VMA
+          , allocator_(other.allocator_)
+#endif
+    {
         other.device_ = VK_NULL_HANDLE;
         other.queue_ = VK_NULL_HANDLE;
         other.transferCmdPool_ = VK_NULL_HANDLE;
         other.phys_ = VK_NULL_HANDLE;
         other.tornDown_ = true;
+#ifdef EASYVK_USE_VMA
+        other.allocator_ = VK_NULL_HANDLE;
+#endif
     }
 
     Device &Device::operator=(Device &&other) noexcept {
@@ -678,6 +700,11 @@ namespace easyvk {
             supportsTimestamps_ = other.supportsTimestamps_;
             timestampPeriod_ = other.timestampPeriod_;
             tornDown_ = other.tornDown_;
+
+#ifdef EASYVK_USE_VMA
+            allocator_ = other.allocator_;
+            other.allocator_ = VK_NULL_HANDLE;
+#endif
 
             other.device_ = VK_NULL_HANDLE;
             other.queue_ = VK_NULL_HANDLE;
@@ -752,6 +779,13 @@ namespace easyvk {
         if (device_ != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(device_);
 
+#ifdef EASYVK_USE_VMA
+            if (allocator_ != VK_NULL_HANDLE) {
+                vmaDestroyAllocator(allocator_);
+                allocator_ = VK_NULL_HANDLE;
+            }
+#endif
+
             if (transferCmdPool_ != VK_NULL_HANDLE) {
                 vkDestroyCommandPool(device_, transferCmdPool_, nullptr);
                 transferCmdPool_ = VK_NULL_HANDLE;
@@ -765,16 +799,21 @@ namespace easyvk {
     }
 
     // -------- BufferMapping implementation --------------------------------------
-    BufferMapping::BufferMapping()
-        : buf_(nullptr), ptr_(nullptr), offset_(0), length_(0), write_(false) {}
+    BufferMapping::BufferMapping() : buf_(nullptr), ptr_(nullptr), offset_(0), length_(0), write_(false) {}
 
     BufferMapping::~BufferMapping() noexcept {
         if (buf_ && ptr_) {
             if (write_) {
                 buf_->flushRange(offset_, length_);
             }
-            // Read mappings don't need invalidation in destructor (already done after mapping)
-            vkUnmapMemory(buf_->device_->vk(), buf_->memory_);
+#ifdef EASYVK_USE_VMA
+            if (buf_->allocation_ != VK_NULL_HANDLE) {
+                vmaUnmapMemory(buf_->device_->allocator(), buf_->allocation_);
+            } else
+#endif
+            {
+                vkUnmapMemory(buf_->device_->vk(), buf_->memory_);
+            }
         }
     }
 
@@ -795,7 +834,14 @@ namespace easyvk {
                 if (write_) {
                     buf_->flushRange(offset_, length_);
                 }
-                vkUnmapMemory(buf_->device_->vk(), buf_->memory_);
+#ifdef EASYVK_USE_VMA
+                if (buf_->allocation_ != VK_NULL_HANDLE) {
+                    vmaUnmapMemory(buf_->device_->allocator(), buf_->allocation_);
+                } else
+#endif
+                {
+                    vkUnmapMemory(buf_->device_->vk(), buf_->memory_);
+                }
             }
 
             buf_ = other.buf_;
@@ -834,31 +880,28 @@ namespace easyvk {
         return flags;
     }
 
-    Buffer::Buffer(Device &dev, const BufferInfo &info)
+    Buffer::Buffer(Device &dev, const BufferCreateInfo &info)
         : device_(&dev),
           buffer_(VK_NULL_HANDLE),
           memory_(VK_NULL_HANDLE),
           size_(info.sizeBytes),
           memFlags_(0),
           hostAccess_(info.host),
-          tornDown_(false) {
-        if (size_ == 0) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "Buffer size cannot be zero";
-            return;
-#else
-            throw std::invalid_argument("Buffer size cannot be zero");
+          tornDown_(false)
+#ifdef EASYVK_USE_VMA
+          , allocation_(VK_NULL_HANDLE)
 #endif
+    {
+        if (size_ == 0) {
+            EVK_FAIL("Buffer size cannot be zero");
         }
 
         VkBufferUsageFlags usage = bufferUsageToVk(info.usage);
 
         // Determine memory properties based on host access
         if (hostAccess_ == HostAccess::None) {
-            // Device-local only
             memFlags_ = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
         } else {
-            // Host-visible, prefer coherent
             memFlags_ = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
         }
 
@@ -888,10 +931,17 @@ namespace easyvk {
           size_(other.size_),
           memFlags_(other.memFlags_),
           hostAccess_(other.hostAccess_),
-          tornDown_(other.tornDown_) {
+          tornDown_(other.tornDown_)
+#ifdef EASYVK_USE_VMA
+          , allocation_(other.allocation_)
+#endif
+    {
         other.buffer_ = VK_NULL_HANDLE;
         other.memory_ = VK_NULL_HANDLE;
         other.tornDown_ = true;
+#ifdef EASYVK_USE_VMA
+        other.allocation_ = VK_NULL_HANDLE;
+#endif
     }
 
     Buffer &Buffer::operator=(Buffer &&other) noexcept {
@@ -904,6 +954,11 @@ namespace easyvk {
             memFlags_ = other.memFlags_;
             hostAccess_ = other.hostAccess_;
             tornDown_ = other.tornDown_;
+
+#ifdef EASYVK_USE_VMA
+            allocation_ = other.allocation_;
+            other.allocation_ = VK_NULL_HANDLE;
+#endif
 
             other.buffer_ = VK_NULL_HANDLE;
             other.memory_ = VK_NULL_HANDLE;
@@ -919,16 +974,13 @@ namespace easyvk {
     }
 
     BufferMapping Buffer::mapWrite(VkDeviceSize offsetBytes, VkDeviceSize lengthBytes) {
+        if (lengthBytes == VK_WHOLE_SIZE) {
+            lengthBytes = size_ - offsetBytes;
+        }
         validateRange(offsetBytes, lengthBytes, "mapWrite");
 
-        if (hostAccess_ == HostAccess::None ||
-            (hostAccess_ != HostAccess::Write && hostAccess_ != HostAccess::ReadWrite)) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "Buffer does not support write mapping";
-            return BufferMapping{};
-#else
-            throw std::runtime_error("Buffer does not support write mapping");
-#endif
+        if (hostAccess_ == HostAccess::None || (hostAccess_ != HostAccess::Write && hostAccess_ != HostAccess::ReadWrite)) {
+            EVK_FAIL("Buffer does not support write mapping");
         }
 
         // Map an aligned superset per nonCoherentAtomSize (safe for both coherent and non-coherent)
@@ -937,25 +989,33 @@ namespace easyvk {
         VkDeviceSize alignedLen = alignUp(lengthBytes + (offsetBytes - alignedOff), atom);
         // Clamp to allocation size
         if (alignedOff + alignedLen > size_) alignedLen = size_ - alignedOff;
+
         void *base = nullptr;
-        VK_CHECK(vkMapMemory(device_->vk(), memory_, alignedOff, alignedLen, 0, &base));
-        // Return pointer to user subrange
-        void *userPtr = static_cast<char *>(base) + (offsetBytes - alignedOff);
-        // Store aligned range in the mapping so dtor can flush exactly this mapped span
-        return {this, userPtr, alignedOff, alignedLen, true};
+#ifdef EASYVK_USE_VMA
+        if (allocation_ != VK_NULL_HANDLE) {
+            // VMA maps the entire allocation starting at offset 0
+            VK_CHECK(vmaMapMemory(device_->allocator(), allocation_, &base));
+            void *userPtr = static_cast<char *>(base) + offsetBytes;
+            return {this, userPtr, alignedOff, alignedLen, true};
+        } else
+#endif
+        {
+            // Raw Vulkan maps [alignedOff, alignedOff+alignedLen)
+            VK_CHECK(vkMapMemory(device_->vk(), memory_, alignedOff, alignedLen, 0, &base));
+            void *userPtr = static_cast<char *>(base) + (offsetBytes - alignedOff);
+            return {this, userPtr, alignedOff, alignedLen, true};
+        }
     }
 
     BufferMapping Buffer::mapRead(VkDeviceSize offsetBytes, VkDeviceSize lengthBytes) {
+        if (lengthBytes == VK_WHOLE_SIZE) {
+            lengthBytes = size_ - offsetBytes;
+        }
         validateRange(offsetBytes, lengthBytes, "mapRead");
 
         if (hostAccess_ == HostAccess::None ||
             (hostAccess_ != HostAccess::Read && hostAccess_ != HostAccess::ReadWrite)) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "Buffer does not support read mapping";
-            return BufferMapping{};
-#else
-            throw std::runtime_error("Buffer does not support read mapping");
-#endif
+            EVK_FAIL("Buffer does not support read mapping");
         }
 
         // Map an aligned superset (see spec VUs for nonCoherentAtomSize alignment)
@@ -963,14 +1023,29 @@ namespace easyvk {
         VkDeviceSize alignedOff = alignDown(offsetBytes, atom);
         VkDeviceSize alignedLen = alignUp(lengthBytes + (offsetBytes - alignedOff), atom);
         if (alignedOff + alignedLen > size_) alignedLen = size_ - alignedOff;
+
         void *base = nullptr;
-        VK_CHECK(vkMapMemory(device_->vk(), memory_, alignedOff, alignedLen, 0, &base));
-        void *userPtr = static_cast<char *>(base) + (offsetBytes - alignedOff);
-        // For non-coherent memory: now that it's mapped, invalidate the mapped span
-        if (!(memFlags_ & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
-            invalidateRange(alignedOff, alignedLen);
+#ifdef EASYVK_USE_VMA
+        if (allocation_ != VK_NULL_HANDLE) {
+            // VMA maps the entire allocation
+            VK_CHECK(vmaMapMemory(device_->allocator(), allocation_, &base));
+            void *userPtr = static_cast<char *>(base) + offsetBytes;
+            // For non-coherent memory: invalidate the mapped span
+            if (!(memFlags_ & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+                invalidateRange(alignedOff, alignedLen);
+            }
+            return {this, userPtr, alignedOff, alignedLen, false};
+        } else
+#endif
+        {
+            // Raw Vulkan maps the aligned subrange
+            VK_CHECK(vkMapMemory(device_->vk(), memory_, alignedOff, alignedLen, 0, &base));
+            void *userPtr = static_cast<char *>(base) + (offsetBytes - alignedOff);
+            if (!(memFlags_ & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+                invalidateRange(alignedOff, alignedLen);
+            }
+            return {this, userPtr, alignedOff, alignedLen, false};
         }
-        return {this, userPtr, alignedOff, alignedLen, false};
     }
 
     bool Buffer::copyTo(Buffer &dst, VkDeviceSize bytes, VkDeviceSize srcOffset, VkDeviceSize dstOffset) {
@@ -1086,6 +1161,29 @@ namespace easyvk {
             VK_SHARING_MODE_EXCLUSIVE,
             0, nullptr
         };
+
+#ifdef EASYVK_USE_VMA
+        if (device_->allocator() != VK_NULL_HANDLE) {
+            VmaAllocationCreateInfo allocInfo{};
+            if (hostAccess_ == HostAccess::None) {
+                allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+            } else {
+                allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+                allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+                if (hostAccess_ == HostAccess::Read || hostAccess_ == HostAccess::ReadWrite) {
+                    allocInfo.flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+                }
+            }
+
+            VmaAllocationInfo allocationInfo;
+            VK_CHECK(vmaCreateBuffer(device_->allocator(), &bufferInfo, &allocInfo,
+                                   buf, &allocation_, &allocationInfo));
+            *mem = VK_NULL_HANDLE; // Memory owned by VMA
+            return;
+        }
+#endif
+
+        // Fallback to manual allocation
         VK_CHECK(vkCreateBuffer(device_->vk(), &bufferInfo, nullptr, buf));
 
         VkMemoryRequirements memReqs;
@@ -1094,12 +1192,7 @@ namespace easyvk {
         uint32_t memoryTypeIndex = device_->selectMemory(memReqs.memoryTypeBits, props);
         if (memoryTypeIndex == UINT32_MAX) {
             vkDestroyBuffer(device_->vk(), *buf, nullptr);
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "Failed to find suitable memory type";
-            return;
-#else
-            throw std::runtime_error("Failed to find suitable memory type");
-#endif
+            EVK_FAIL("Failed to find suitable memory type");
         }
 
         VkMemoryAllocateInfo allocInfo{
@@ -1114,6 +1207,13 @@ namespace easyvk {
 
     void Buffer::flushRange(VkDeviceSize offset, VkDeviceSize sizeBytes) {
         if (memFlags_ & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) return;
+
+#ifdef EASYVK_USE_VMA
+        if (allocation_ != VK_NULL_HANDLE) {
+            VK_CHECK(vmaFlushAllocation(device_->allocator(), allocation_, offset, sizeBytes));
+            return;
+        }
+#endif
 
         VkDeviceSize atomSize = device_->limits().nonCoherentAtomSize;
         VkDeviceSize alignedOffset = alignDown(offset, atomSize);
@@ -1137,6 +1237,13 @@ namespace easyvk {
     void Buffer::invalidateRange(VkDeviceSize offset, VkDeviceSize sizeBytes) {
         if (memFlags_ & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) return;
 
+#ifdef EASYVK_USE_VMA
+        if (allocation_ != VK_NULL_HANDLE) {
+            VK_CHECK(vmaInvalidateAllocation(device_->allocator(), allocation_, offset, sizeBytes));
+            return;
+        }
+#endif
+
         VkDeviceSize atomSize = device_->limits().nonCoherentAtomSize;
         VkDeviceSize alignedOffset = alignDown(offset, atomSize);
         VkDeviceSize alignedSize = alignUp(sizeBytes + (offset - alignedOffset), atomSize);
@@ -1159,14 +1266,23 @@ namespace easyvk {
     void Buffer::teardown() {
         if (tornDown_) return;
 
-        if (memory_ != VK_NULL_HANDLE) {
-            vkFreeMemory(device_->vk(), memory_, nullptr);
-            memory_ = VK_NULL_HANDLE;
-        }
-
-        if (buffer_ != VK_NULL_HANDLE) {
-            vkDestroyBuffer(device_->vk(), buffer_, nullptr);
+#ifdef EASYVK_USE_VMA
+        if (allocation_ != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(device_->allocator(), buffer_, allocation_);
             buffer_ = VK_NULL_HANDLE;
+            allocation_ = VK_NULL_HANDLE;
+        } else
+#endif
+        {
+            if (memory_ != VK_NULL_HANDLE) {
+                vkFreeMemory(device_->vk(), memory_, nullptr);
+                memory_ = VK_NULL_HANDLE;
+            }
+
+            if (buffer_ != VK_NULL_HANDLE) {
+                vkDestroyBuffer(device_->vk(), buffer_, nullptr);
+                buffer_ = VK_NULL_HANDLE;
+            }
         }
 
         tornDown_ = true;
@@ -1174,23 +1290,53 @@ namespace easyvk {
 
     // -------- ComputeBindings implementation ------------------------------------
     void ComputeBindings::addStorage(uint32_t binding, const Buffer &buf, VkDeviceSize offset, VkDeviceSize range) {
-        entries.push_back(ComputeBindingEntry{
+        entries.emplace_back(
             binding,
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             buf.vk(),
             offset,
             range == VK_WHOLE_SIZE ? buf.size() : range
-        });
+        );
     }
 
     void ComputeBindings::addUniform(uint32_t binding, const Buffer &buf, VkDeviceSize offset, VkDeviceSize range) {
-        entries.push_back(ComputeBindingEntry{
+        entries.emplace_back(
             binding,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             buf.vk(),
             offset,
             range == VK_WHOLE_SIZE ? buf.size() : range
-        });
+        );
+    }
+
+    void ComputeBindings::addStorageArray(uint32_t set, uint32_t binding, const std::vector<Buffer *> &buffers) {
+        std::vector<VkDescriptorBufferInfo> bufferInfos;
+        bufferInfos.reserve(buffers.size());
+        for (const Buffer *buf : buffers) {
+            bufferInfos.push_back({buf->vk(), 0, buf->size()});
+        }
+        entries.emplace_back(set, binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, bufferInfos);
+    }
+
+    void ComputeBindings::addUniformArray(uint32_t set, uint32_t binding, const std::vector<Buffer *> &buffers) {
+        std::vector<VkDescriptorBufferInfo> bufferInfos;
+        bufferInfos.reserve(buffers.size());
+        for (const Buffer *buf : buffers) {
+            bufferInfos.push_back({buf->vk(), 0, buf->size()});
+        }
+        entries.emplace_back(set, binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, bufferInfos);
+    }
+
+    void ComputeBindings::addStorageToSet(uint32_t set, uint32_t binding, const Buffer &buf, VkDeviceSize offset, VkDeviceSize range) {
+        std::vector<VkDescriptorBufferInfo> bufferInfos;
+        bufferInfos.push_back({buf.vk(), offset, range == VK_WHOLE_SIZE ? buf.size() : range});
+        entries.emplace_back(set, binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, bufferInfos);
+    }
+
+    void ComputeBindings::addUniformToSet(uint32_t set, uint32_t binding, const Buffer &buf, VkDeviceSize offset, VkDeviceSize range) {
+        std::vector<VkDescriptorBufferInfo> bufferInfos;
+        bufferInfos.push_back({buf.vk(), offset, range == VK_WHOLE_SIZE ? buf.size() : range});
+        entries.emplace_back(set, binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, bufferInfos);
     }
 
     // -------- ComputeProgram implementation -------------------------------------
@@ -1198,9 +1344,7 @@ namespace easyvk {
         : device_(nullptr),
           layout_(VK_NULL_HANDLE),
           pipeline_(VK_NULL_HANDLE),
-          dsl_(VK_NULL_HANDLE),
           dsp_(VK_NULL_HANDLE),
-          ds_(VK_NULL_HANDLE),
           shader_(VK_NULL_HANDLE),
           cmdPool_(VK_NULL_HANDLE),
           cmdBuf_(VK_NULL_HANDLE),
@@ -1214,15 +1358,17 @@ namespace easyvk {
           localY_(1),
           localZ_(1),
           initialized_(false),
-          tornDown_(false) {}
+          tornDown_(false),
+          timestampInFlight_(false),
+          lastTimestamps_() {
+        lastTimestamps_[0] = lastTimestamps_[1] = 0;
+    }
 
-    ComputeProgram::ComputeProgram(Device &dev, const ComputeProgramInfo &info)
+    ComputeProgram::ComputeProgram(Device &dev, const ComputeProgramCreateInfo &info)
         : device_(&dev),
           layout_(VK_NULL_HANDLE),
           pipeline_(VK_NULL_HANDLE),
-          dsl_(VK_NULL_HANDLE),
           dsp_(VK_NULL_HANDLE),
-          ds_(VK_NULL_HANDLE),
           shader_(VK_NULL_HANDLE),
           cmdPool_(VK_NULL_HANDLE),
           cmdBuf_(VK_NULL_HANDLE),
@@ -1237,102 +1383,65 @@ namespace easyvk {
           localY_(info.localY),
           localZ_(info.localZ),
           initialized_(true),
-          tornDown_(false) {
+          tornDown_(false),
+          timestampInFlight_(false),
+          lastTimestamps_() {
+        lastTimestamps_[0] = lastTimestamps_[1] = 0;
+
         if (!info.spirv || info.spirv->empty()) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "SPIR-V code is required";
-            initialized_ = false;
-            return;
-#else
-            throw std::invalid_argument("SPIR-V code is required");
-#endif
+            EVK_FAIL_VOID("SPIR-V code is required");
         }
 
         if (!isValidSPIRV(*info.spirv)) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "Invalid SPIR-V code";
-            initialized_ = false;
-            return;
-#else
-            throw std::invalid_argument("Invalid SPIR-V code");
-#endif
+            EVK_FAIL_VOID("Invalid SPIR-V code");
         }
+
+#ifdef EASYVK_USE_SPIRV_TOOLS
+        std::string spirvError;
+        if (!validateSPIRV(*info.spirv, spirvError)) {
+            EVK_FAIL_VOID("SPIR-V validation failed: " + spirvError);
+        }
+#endif
 
         // Validate push constant constraints
         if (pcCapacityBytes_ > 0) {
             if (pcCapacityBytes_ % 4 != 0) {
-#ifdef EASYVK_NO_EXCEPTIONS
-                lastError_ = "Push constant size must be 4-byte aligned";
-                initialized_ = false;
-                return;
-#else
-                throw std::invalid_argument("Push constant size must be 4-byte aligned");
-#endif
+                EVK_FAIL_VOID("Push constant size must be 4-byte aligned");
             }
             if (pcCapacityBytes_ > device_->limits().maxPushConstantsSize) {
-#ifdef EASYVK_NO_EXCEPTIONS
-                lastError_ = "Push constant size exceeds device limit";
-                initialized_ = false;
-                return;
-#else
-                throw std::invalid_argument("Push constant size exceeds device limit of " +
-                    std::to_string(device_->limits().maxPushConstantsSize) + " bytes");
-#endif
+                EVK_FAIL_VOID("Push constant size exceeds device limit");
             }
             pcData_.resize(pcCapacityBytes_, 0);
         }
 
         // Validate local workgroup size against device limits
         if (localX_ == 0 || localY_ == 0 || localZ_ == 0) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "Local workgroup size must be >= 1 in all dimensions";
-            initialized_ = false;
-            return;
-#else
-            throw std::invalid_argument("Local workgroup size must be >= 1 in all dimensions");
-#endif
+            EVK_FAIL_VOID("Local workgroup size must be >= 1 in all dimensions");
         }
         const auto &lim = device_->limits();
         if (localX_ > lim.maxComputeWorkGroupSize[0] ||
             localY_ > lim.maxComputeWorkGroupSize[1] ||
             localZ_ > lim.maxComputeWorkGroupSize[2]) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "Local workgroup size exceeds device maxComputeWorkGroupSize[]";
-            initialized_ = false;
-            return;
-#else
-            throw std::invalid_argument("Local workgroup size exceeds device maxComputeWorkGroupSize[]");
-#endif
+            EVK_FAIL_VOID("Local workgroup size exceeds device maxComputeWorkGroupSize[]");
         }
         const uint64_t invocations = uint64_t(localX_) * uint64_t(localY_) * uint64_t(localZ_);
         if (invocations > lim.maxComputeWorkGroupInvocations) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "Local workgroup invocations exceed maxComputeWorkGroupInvocations";
-            initialized_ = false;
-            return;
-#else
-            throw std::invalid_argument("Local workgroup invocations exceed maxComputeWorkGroupInvocations");
-#endif
+            EVK_FAIL_VOID("Local workgroup invocations exceed maxComputeWorkGroupInvocations");
         }
 
         // Validate descriptor buffer alignments
         for (const auto &entry : info.bindings.entries) {
-            VkDeviceSize requiredAlignment = 0;
-            if (entry.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-                requiredAlignment = device_->limits().minUniformBufferOffsetAlignment;
-            } else if (entry.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
-                requiredAlignment = device_->limits().minStorageBufferOffsetAlignment;
-            }
+            for (const auto &bufInfo : entry.buffers) {
+                VkDeviceSize requiredAlignment = 0;
+                if (entry.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
+                    requiredAlignment = device_->limits().minUniformBufferOffsetAlignment;
+                } else if (entry.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
+                    requiredAlignment = device_->limits().minStorageBufferOffsetAlignment;
+                }
 
-            if (requiredAlignment > 0 && (entry.offset % requiredAlignment) != 0) {
-#ifdef EASYVK_NO_EXCEPTIONS
-                lastError_ = "Descriptor buffer offset violates alignment requirement";
-                initialized_ = false;
-                return;
-#else
-                throw std::invalid_argument("Descriptor buffer offset " + std::to_string(entry.offset) +
-                    " violates alignment requirement " + std::to_string(requiredAlignment));
-#endif
+                if (requiredAlignment > 0 && (bufInfo.offset % requiredAlignment) != 0) {
+                    EVK_FAIL_VOID("Descriptor buffer offset violates alignment requirement");
+                }
             }
         }
 
@@ -1347,53 +1456,71 @@ namespace easyvk {
             };
             VK_CHECK(vkCreateShaderModule(device_->vk(), &createInfo, nullptr, &shader_));
 
-            // Create descriptor set layout
-            std::vector<VkDescriptorSetLayoutBinding> bindings;
+            // Group bindings by set
+            std::map<uint32_t, std::vector<VkDescriptorSetLayoutBinding>> setBindings;
             for (const auto &entry : info.bindings.entries) {
-                bindings.push_back(VkDescriptorSetLayoutBinding{
+                setBindings[entry.set].push_back(VkDescriptorSetLayoutBinding{
                     entry.binding,
                     entry.type,
-                    1,
+                    entry.buffers.size(),
                     VK_SHADER_STAGE_COMPUTE_BIT,
                     nullptr
                 });
             }
 
-            VkDescriptorSetLayoutCreateInfo dslCreateInfo{
-                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                nullptr,
-                0,
-                static_cast<uint32_t>(bindings.size()),
-                bindings.data()
-            };
-            VK_CHECK(vkCreateDescriptorSetLayout(device_->vk(), &dslCreateInfo, nullptr, &dsl_));
+            // Create descriptor set layouts (fill gaps with empty layouts)
+            setLayouts_.resize(setBindings.empty() ? 0 : setBindings.rbegin()->first + 1);
+            for (const auto &pair : setBindings) {
+                uint32_t setIndex = pair.first;
+                const auto &bindings = pair.second;
+                VkDescriptorSetLayoutCreateInfo dslCreateInfo{
+                    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                    nullptr,
+                    0,
+                    bindings.size(),
+                    bindings.data()
+                };
+                VK_CHECK(vkCreateDescriptorSetLayout(device_->vk(), &dslCreateInfo, nullptr, &setLayouts_[setIndex]));
+            }
+            for (VkDescriptorSetLayout &setLayout : setLayouts_) {
+                if (setLayout == VK_NULL_HANDLE) {
+                    // Create an empty (0-binding) layout for missing lower-index sets
+                    VkDescriptorSetLayoutCreateInfo emptyDsl{
+                        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                        nullptr, 0, 0, nullptr
+                    };
+                    VK_CHECK(vkCreateDescriptorSetLayout(device_->vk(), &emptyDsl, nullptr, &setLayout));
+                }
+            }
 
             // Create pipeline layout
             VkPushConstantRange pushRange{};
             if (pcCfg_.sizeBytes > 0) {
                 pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-                pushRange.offset     = pcCfg_.offset;
-                pushRange.size       = pcCfg_.sizeBytes;
+                pushRange.offset = pcCfg_.offset;
+                pushRange.size = pcCfg_.sizeBytes;
             }
 
             VkPipelineLayoutCreateInfo layoutCreateInfo{
                 VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                 nullptr,
                 0,
-                1, &dsl_,
+                setLayouts_.size(),
+                setLayouts_.data(),
                 pcCfg_.sizeBytes > 0 ? 1u : 0u,
                 pcCfg_.sizeBytes > 0 ? &pushRange : nullptr
             };
             VK_CHECK(vkCreatePipelineLayout(device_->vk(), &layoutCreateInfo, nullptr, &layout_));
 
-            // Create descriptor pool and set
-            if (!bindings.empty()) {
+            // Create descriptor pool and sets
+            if (!info.bindings.entries.empty()) {
                 std::map<VkDescriptorType, uint32_t> typeCounts;
-                for (const auto &binding : bindings) {
-                    typeCounts[binding.descriptorType]++;
+                for (const auto &entry : info.bindings.entries) {
+                    typeCounts[entry.type] += entry.buffers.size();
                 }
 
                 std::vector<VkDescriptorPoolSize> poolSizes;
+                poolSizes.reserve(typeCounts.size());
                 for (const auto &pair : typeCounts) {
                     poolSizes.push_back({pair.first, pair.second});
                 }
@@ -1402,40 +1529,36 @@ namespace easyvk {
                     VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
                     nullptr,
                     0,
-                    1,
-                    static_cast<uint32_t>(poolSizes.size()),
+                    setLayouts_.size(),
+                    poolSizes.size(),
                     poolSizes.data()
                 };
                 VK_CHECK(vkCreateDescriptorPool(device_->vk(), &poolCreateInfo, nullptr, &dsp_));
 
+                descriptorSets_.resize(setLayouts_.size());
                 VkDescriptorSetAllocateInfo allocInfo{
                     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                     nullptr,
                     dsp_,
-                    1, &dsl_
+                    setLayouts_.size(),
+                    setLayouts_.data()
                 };
-                VK_CHECK(vkAllocateDescriptorSets(device_->vk(), &allocInfo, &ds_));
+                VK_CHECK(vkAllocateDescriptorSets(device_->vk(), &allocInfo, descriptorSets_.data()));
 
-                // Update descriptor set (build buffer infos first to ensure stable addresses)
-                const size_t n = info.bindings.entries.size();
-                std::vector<VkDescriptorBufferInfo> bufferInfos;
-                bufferInfos.reserve(n);
-                for (const auto &entry : info.bindings.entries) {
-                    bufferInfos.push_back({entry.buffer, entry.offset, entry.range});
-                }
+                // Update descriptor sets
                 std::vector<VkWriteDescriptorSet> writes;
-                writes.reserve(n);
-                for (size_t i = 0; i < n; ++i) {
-                    const auto &entry = info.bindings.entries[i];
+                writes.reserve(info.bindings.entries.size());
+                for (const auto &entry : info.bindings.entries) {
                     writes.push_back(VkWriteDescriptorSet{
                         VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                         nullptr,
-                        ds_,
+                        descriptorSets_[entry.set],
                         entry.binding,
-                        0, 1,
+                        0,
+                        entry.buffers.size(),
                         entry.type,
                         nullptr,
-                        &bufferInfos[i],
+                        entry.buffers.data(),
                         nullptr
                     });
                 }
@@ -1454,9 +1577,7 @@ namespace easyvk {
 
             // Add local memory specialization constants
             for (const auto &mem : info.localMemory) {
-                specEntries.push_back({
-                    3 + mem.first, static_cast<uint32_t>((3 + mem.first) * sizeof(uint32_t)), sizeof(uint32_t)
-                });
+                specEntries.push_back({3 + mem.first, (3 + mem.first) * sizeof(uint32_t), sizeof(uint32_t)});
                 if (specData.size() <= 3 + mem.first) {
                     specData.resize(3 + mem.first + 1, 0);
                 }
@@ -1464,7 +1585,7 @@ namespace easyvk {
             }
 
             VkSpecializationInfo specInfo{
-                static_cast<uint32_t>(specEntries.size()),
+                specEntries.size(),
                 specEntries.data(),
                 specData.size() * sizeof(uint32_t),
                 specData.data()
@@ -1533,11 +1654,11 @@ namespace easyvk {
 
     ComputeProgram::ComputeProgram(ComputeProgram &&other) noexcept
         : device_(other.device_),
+          setLayouts_(std::move(other.setLayouts_)),
           layout_(other.layout_),
           pipeline_(other.pipeline_),
-          dsl_(other.dsl_),
           dsp_(other.dsp_),
-          ds_(other.ds_),
+          descriptorSets_(std::move(other.descriptorSets_)),
           shader_(other.shader_),
           cmdPool_(other.cmdPool_),
           cmdBuf_(other.cmdBuf_),
@@ -1553,12 +1674,15 @@ namespace easyvk {
           localZ_(other.localZ_),
           pcData_(std::move(other.pcData_)),
           initialized_(other.initialized_),
-          tornDown_(other.tornDown_) {
+          tornDown_(other.tornDown_),
+          timestampInFlight_(other.timestampInFlight_),
+          lastTimestamps_() {
+        lastTimestamps_[0] = other.lastTimestamps_[0];
+        lastTimestamps_[1] = other.lastTimestamps_[1];
+
         other.layout_ = VK_NULL_HANDLE;
         other.pipeline_ = VK_NULL_HANDLE;
-        other.dsl_ = VK_NULL_HANDLE;
         other.dsp_ = VK_NULL_HANDLE;
-        other.ds_ = VK_NULL_HANDLE;
         other.shader_ = VK_NULL_HANDLE;
         other.cmdPool_ = VK_NULL_HANDLE;
         other.cmdBuf_ = VK_NULL_HANDLE;
@@ -1566,6 +1690,7 @@ namespace easyvk {
         other.timestampQueryPool_ = VK_NULL_HANDLE;
         other.initialized_ = false;
         other.tornDown_ = true;
+        other.timestampInFlight_ = false;
     }
 
     ComputeProgram &ComputeProgram::operator=(ComputeProgram &&other) noexcept {
@@ -1573,11 +1698,11 @@ namespace easyvk {
             teardown();
 
             device_ = other.device_;
+            setLayouts_ = std::move(other.setLayouts_);
             layout_ = other.layout_;
             pipeline_ = other.pipeline_;
-            dsl_ = other.dsl_;
             dsp_ = other.dsp_;
-            ds_ = other.ds_;
+            descriptorSets_ = std::move(other.descriptorSets_);
             shader_ = other.shader_;
             cmdPool_ = other.cmdPool_;
             cmdBuf_ = other.cmdBuf_;
@@ -1594,12 +1719,13 @@ namespace easyvk {
             pcData_ = std::move(other.pcData_);
             initialized_ = other.initialized_;
             tornDown_ = other.tornDown_;
+            timestampInFlight_ = other.timestampInFlight_;
+            lastTimestamps_[0] = other.lastTimestamps_[0];
+            lastTimestamps_[1] = other.lastTimestamps_[1];
 
             other.layout_ = VK_NULL_HANDLE;
             other.pipeline_ = VK_NULL_HANDLE;
-            other.dsl_ = VK_NULL_HANDLE;
             other.dsp_ = VK_NULL_HANDLE;
-            other.ds_ = VK_NULL_HANDLE;
             other.shader_ = VK_NULL_HANDLE;
             other.cmdPool_ = VK_NULL_HANDLE;
             other.cmdBuf_ = VK_NULL_HANDLE;
@@ -1607,6 +1733,7 @@ namespace easyvk {
             other.timestampQueryPool_ = VK_NULL_HANDLE;
             other.initialized_ = false;
             other.tornDown_ = true;
+            other.timestampInFlight_ = false;
         }
         return *this;
     }
@@ -1625,10 +1752,9 @@ namespace easyvk {
     }
 
     void ComputeProgram::setPushConstants(const void *data, uint32_t bytes, uint32_t offset) {
-        // Allocate on first use; keep zero-initialized by default.
         if (pcData_.size() < pcCfg_.sizeBytes) pcData_.assign(pcCfg_.sizeBytes, 0);
         if (!data || bytes == 0) return;
-        // Bounds: clamp to configured size to avoid overrun.
+
         uint32_t end = std::min<uint32_t>(offset + bytes, pcCfg_.sizeBytes);
         if (offset < end) {
             std::memcpy(pcData_.data() + offset, data, end - offset);
@@ -1637,24 +1763,14 @@ namespace easyvk {
 
     void ComputeProgram::setWorkgroups(uint32_t x, uint32_t y, uint32_t z) {
         if (x == 0 || y == 0 || z == 0) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "Workgroup counts must be greater than zero";
-            return;
-#else
-            throw std::invalid_argument("Workgroup counts must be greater than zero");
-#endif
+            EVK_FAIL_VOID("Workgroup counts must be greater than zero");
         }
 
         // Check against device limits
         if (x > device_->limits().maxComputeWorkGroupCount[0] ||
             y > device_->limits().maxComputeWorkGroupCount[1] ||
             z > device_->limits().maxComputeWorkGroupCount[2]) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "Workgroup count exceeds device limits";
-            return;
-#else
-            throw std::invalid_argument("Workgroup count exceeds device limits");
-#endif
+            EVK_FAIL_VOID("Workgroup count exceeds device limits");
         }
 
         groupsX_ = x;
@@ -1681,99 +1797,11 @@ namespace easyvk {
         }
 
         if (!initialized_) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "Program not initialized";
-            return 0.0;
-#else
-            throw std::runtime_error("Program not initialized");
-#endif
+            EVK_FAIL("Program not initialized");
         }
 
-        VK_CHECK(vkResetCommandBuffer(cmdBuf_, 0));
-
-        VkCommandBufferBeginInfo beginInfo{
-            VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            nullptr,
-            VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-            nullptr
-        };
-        VK_CHECK(vkBeginCommandBuffer(cmdBuf_, &beginInfo));
-
-        // Reset query pool
-        vkCmdResetQueryPool(cmdBuf_, timestampQueryPool_, 0, 2);
-
-        vkCmdBindPipeline(cmdBuf_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
-
-        // Optional GPU label for captures
-        if (vkCmdBeginDebugUtilsLabelEXT) {
-            VkDebugUtilsLabelEXT label{VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT};
-            label.pLabelName = "easyvk::dispatchWithTiming";
-            vkCmdBeginDebugUtilsLabelEXT(cmdBuf_, &label);
-        }
-
-        if (ds_ != VK_NULL_HANDLE) {
-            vkCmdBindDescriptorSets(cmdBuf_, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 0, 1, &ds_, 0, nullptr);
-        }
-
-        // If the shader statically uses push constants, set them before dispatch.
-        if (pcCfg_.sizeBytes > 0) {
-            // Guarantee vector is allocated & at least sizeBytes large.
-            if (pcData_.size() < pcCfg_.sizeBytes) pcData_.assign(pcCfg_.sizeBytes, 0);
-            vkCmdPushConstants(cmdBuf_,
-                               layout_,
-                               VK_SHADER_STAGE_COMPUTE_BIT,
-                               pcCfg_.offset,
-                               pcCfg_.sizeBytes,
-                               pcData_.data());
-        }
-
-        // Write start timestamp
-        vkCmdWriteTimestamp(cmdBuf_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 0);
-
-        // Host->Device barrier: ensure host writes are visible to shader reads
-        VkMemoryBarrier hostToDeviceBarrier{
-            VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-            nullptr,
-            VK_ACCESS_HOST_WRITE_BIT,
-            VK_ACCESS_SHADER_READ_BIT
-        };
-        vkCmdPipelineBarrier(cmdBuf_, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             0, 1, &hostToDeviceBarrier, 0, nullptr, 0, nullptr);
-
-        vkCmdDispatch(cmdBuf_, groupsX_, groupsY_, groupsZ_);
-
-        // Write end timestamp
-        vkCmdWriteTimestamp(cmdBuf_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 1);
-
-        // Default Compute->Host barrier
-        VkMemoryBarrier barrier{
-            VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-            nullptr,
-            VK_ACCESS_SHADER_WRITE_BIT,
-            VK_ACCESS_HOST_READ_BIT
-        };
-        vkCmdPipelineBarrier(cmdBuf_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
-                             0, 1, &barrier, 0, nullptr, 0, nullptr);
-
-        // Close optional label
-        if (vkCmdEndDebugUtilsLabelEXT) {
-            vkCmdEndDebugUtilsLabelEXT(cmdBuf_);
-        }
-
-        VK_CHECK(vkEndCommandBuffer(cmdBuf_));
-
-        VK_CHECK(vkResetFences(device_->vk(), 1, &fence_));
-
-        VkSubmitInfo submitInfo{
-            VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            nullptr,
-            0, nullptr, nullptr,
-            1, &cmdBuf_,
-            0, nullptr
-        };
-
-        VK_CHECK(vkQueueSubmit(device_->computeQueue(), 1, &submitInfo, fence_));
-        VK_CHECK(vkWaitForFences(device_->vk(), 1, &fence_, VK_TRUE, UINT64_MAX));
+        SubmitHandle handle = submitAsync(true, true);
+        device_->wait(handle);
 
         // Get timestamp results
         uint64_t timestamps[2];
@@ -1784,14 +1812,44 @@ namespace easyvk {
         return static_cast<double>(timestamps[1] - timestamps[0]) * device_->timestampPeriod();
     }
 
-    void ComputeProgram::submitAndWait(bool addHostBarrier) {
+    SubmitHandle ComputeProgram::dispatchWithTimingAsync() {
+        if (!supportsTimestamps()) {
+            return submitAsync(true, false);
+        }
+
+        timestampInFlight_ = true;
+        return submitAsync(true, true);
+    }
+
+    bool ComputeProgram::tryGetTimingNs(double& outNs) {
+        if (!supportsTimestamps() || !timestampInFlight_) {
+            return false;
+        }
+        struct QueryPair { uint64_t value; uint64_t available; };
+        QueryPair q[2] = {};
+        VkResult result = vkGetQueryPoolResults(device_->vk(), timestampQueryPool_, 0, 2,
+            sizeof(q), q, sizeof(QueryPair),
+            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+
+        if (result == VK_NOT_READY) {
+            return false;
+        }
+
+        VK_CHECK(result);
+
+        if (q[0].available == 0 || q[1].available == 0) {
+            return false;
+        }
+        lastTimestamps_[0] = q[0].value;
+        lastTimestamps_[1] = q[1].value;
+        timestampInFlight_ = false;
+        outNs = static_cast<double>(q[1].value - q[0].value) * device_->timestampPeriod();
+        return true;
+    }
+
+    SubmitHandle ComputeProgram::submitAsync(bool addHostBarrier, bool enableTimestamps) {
         if (!initialized_) {
-#ifdef EASYVK_NO_EXCEPTIONS
-            lastError_ = "Program not initialized";
-            return;
-#else
-            throw std::runtime_error("Program not initialized");
-#endif
+            EVK_FAIL("Program not initialized");
         }
 
         VK_CHECK(vkResetCommandBuffer(cmdBuf_, 0));
@@ -1804,6 +1862,10 @@ namespace easyvk {
         };
         VK_CHECK(vkBeginCommandBuffer(cmdBuf_, &beginInfo));
 
+        if (enableTimestamps && timestampQueryPool_ != VK_NULL_HANDLE) {
+            vkCmdResetQueryPool(cmdBuf_, timestampQueryPool_, 0, 2);
+        }
+
         vkCmdBindPipeline(cmdBuf_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
 
         // Optional GPU label for captures
@@ -1813,23 +1875,19 @@ namespace easyvk {
             vkCmdBeginDebugUtilsLabelEXT(cmdBuf_, &label);
         }
 
-        if (ds_ != VK_NULL_HANDLE) {
-            vkCmdBindDescriptorSets(cmdBuf_, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 0, 1, &ds_, 0, nullptr);
+        if (!descriptorSets_.empty()) {
+            vkCmdBindDescriptorSets(cmdBuf_, VK_PIPELINE_BIND_POINT_COMPUTE, layout_, 0,
+                                  static_cast<uint32_t>(descriptorSets_.size()),
+                                  descriptorSets_.data(), 0, nullptr);
         }
 
-        // If the shader statically uses push constants, set them before dispatch.
+        // Push constants
         if (pcCfg_.sizeBytes > 0) {
-            // Guarantee vector is allocated & at least sizeBytes large.
             if (pcData_.size() < pcCfg_.sizeBytes) pcData_.assign(pcCfg_.sizeBytes, 0);
-            vkCmdPushConstants(cmdBuf_,
-                               layout_,
-                               VK_SHADER_STAGE_COMPUTE_BIT,
-                               pcCfg_.offset,
-                               pcCfg_.sizeBytes,
-                               pcData_.data());
+            vkCmdPushConstants(cmdBuf_, layout_, VK_SHADER_STAGE_COMPUTE_BIT, pcCfg_.offset, pcCfg_.sizeBytes, pcData_.data());
         }
 
-        // Host->Device barrier: ensure host writes are visible to shader reads
+        // Host->Device barrier
         VkMemoryBarrier hostToDeviceBarrier{
             VK_STRUCTURE_TYPE_MEMORY_BARRIER,
             nullptr,
@@ -1839,10 +1897,17 @@ namespace easyvk {
         vkCmdPipelineBarrier(cmdBuf_, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              0, 1, &hostToDeviceBarrier, 0, nullptr, 0, nullptr);
 
+        if (enableTimestamps && timestampQueryPool_ != VK_NULL_HANDLE) {
+            vkCmdWriteTimestamp(cmdBuf_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 0);
+        }
+
         vkCmdDispatch(cmdBuf_, groupsX_, groupsY_, groupsZ_);
 
+        if (enableTimestamps && timestampQueryPool_ != VK_NULL_HANDLE) {
+            vkCmdWriteTimestamp(cmdBuf_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestampQueryPool_, 1);
+        }
+
         if (addHostBarrier) {
-            // Default Compute->Host barrier for safe CPU readback
             VkMemoryBarrier barrier{
                 VK_STRUCTURE_TYPE_MEMORY_BARRIER,
                 nullptr,
@@ -1853,14 +1918,15 @@ namespace easyvk {
                                  0, 1, &barrier, 0, nullptr, 0, nullptr);
         }
 
-        // Close optional label
         if (vkCmdEndDebugUtilsLabelEXT) {
             vkCmdEndDebugUtilsLabelEXT(cmdBuf_);
         }
 
         VK_CHECK(vkEndCommandBuffer(cmdBuf_));
 
-        VK_CHECK(vkResetFences(device_->vk(), 1, &fence_));
+        VkFence asyncFence;
+        VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, 0};
+        VK_CHECK(vkCreateFence(device_->vk(), &fenceInfo, nullptr, &asyncFence));
 
         VkSubmitInfo submitInfo{
             VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -1870,8 +1936,13 @@ namespace easyvk {
             0, nullptr
         };
 
-        VK_CHECK(vkQueueSubmit(device_->computeQueue(), 1, &submitInfo, fence_));
-        VK_CHECK(vkWaitForFences(device_->vk(), 1, &fence_, VK_TRUE, UINT64_MAX));
+        VK_CHECK(vkQueueSubmit(device_->computeQueue(), 1, &submitInfo, asyncFence));
+        return SubmitHandle{asyncFence, VK_NULL_HANDLE};
+    }
+
+    void ComputeProgram::submitAndWait(bool addHostBarrier) {
+        SubmitHandle handle = submitAsync(addHostBarrier, false);
+        device_->wait(handle);
     }
 
     void ComputeProgram::teardown() {
@@ -1913,10 +1984,12 @@ namespace easyvk {
                 dsp_ = VK_NULL_HANDLE;
             }
 
-            if (dsl_ != VK_NULL_HANDLE) {
-                vkDestroyDescriptorSetLayout(device_->vk(), dsl_, nullptr);
-                dsl_ = VK_NULL_HANDLE;
+            for (auto layout : setLayouts_) {
+                if (layout != VK_NULL_HANDLE) {
+                    vkDestroyDescriptorSetLayout(device_->vk(), layout, nullptr);
+                }
             }
+            setLayouts_.clear();
 
             if (shader_ != VK_NULL_HANDLE) {
                 vkDestroyShaderModule(device_->vk(), shader_, nullptr);
@@ -1935,7 +2008,7 @@ namespace easyvk {
             VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
             nullptr, type, objectHandle, name
         };
-        // Available after volkLoadDevice(device_) above; guard pointer in case not loaded.
+
         if (vkSetDebugUtilsObjectNameEXT) {
             vkSetDebugUtilsObjectNameEXT(dev.vk(), &nameInfo);
         }
