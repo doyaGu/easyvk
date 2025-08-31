@@ -15,93 +15,96 @@
 */
 
 #include <cassert>
-#include <vector>
+#include <cmath>
+#include <cstring>
 #include <iostream>
-#include <fstream>
+#include <vector>
 
 #include <easyvk.h>
 
-const int size = 1024 * 16;
+static constexpr uint32_t kSize = 1024u * 16u;
+static constexpr uint32_t kLocalSize = 64u; // specialization: local_size_x
 
 int main() {
-	// Initialize instance.
-	auto instance = easyvk::Instance(true);
-	// Get list of available physical devices.
-	auto physicalDevices = instance.physicalDevices();
-	// Create device from first physical device.
-	auto device = easyvk::Device(instance, physicalDevices.at(0));
-	std::cout << "Using device: " << device.properties.deviceName << "\n";
+    // 1) Instance & device ------------------------------------------------------
+    easyvk::Instance instance(/*enableValidationLayers=*/true);
+    easyvk::Device   device(instance, /*preferredIndex=*/0);
 
-	auto numIters = 1;
-	for (int n = 0; n < numIters; n++) {
-		// Define the buffers to use in the kernel.
-		std::vector<easyvk::Buffer> bufs;
-		bufs.emplace_back(device, size * sizeof(uint32_t));
-		bufs.emplace_back(device, size * sizeof(float));
-		bufs.emplace_back(device, size * sizeof(float));
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(device.physical(), &props);
+    std::cout << "Using device: " << props.deviceName
+              << " [" << device.vendorName() << "]\n";
 
-		auto &a = bufs[0];
-		auto &b = bufs[1];
-		auto &c = bufs[2];
+    // 2) Host-mappable storage buffers -----------------------------------------
+    const VkDeviceSize bytes = kSize * sizeof(float); // 4B either way
+    easyvk::Buffer aBuf(device, bytes, easyvk::BufferUsage::Storage, easyvk::HostAccess::ReadWrite);
+    easyvk::Buffer bBuf(device, bytes, easyvk::BufferUsage::Storage, easyvk::HostAccess::ReadWrite);
+    easyvk::Buffer cBuf(device, bytes, easyvk::BufferUsage::Storage, easyvk::HostAccess::Read);
 
-		// Write initial values to the buffers.
-		printf("Setting up host buffers...\n");
-		std::vector<uint32_t> a_host;
-		std::vector<float> b_host;
-		for (int i = 0; i < size; i++) {
-			// The buffer provides an untyped view of the memory, so you must specify
-			// the type when using the load/store methods. 
-			a_host.push_back(i);
-			b_host.push_back(i + 1);
-		}
+    // Initialize A[i]=i (UINT), B[i]=i+1 (FLOAT) on the CPU
+    {
+        auto mapA = aBuf.mapWrite(0, aBuf.size());
+        auto mapB = bBuf.mapWrite(0, bBuf.size());
+        auto *A = mapA.as<uint32_t>();
+        auto *B = mapB.as<float>();
+        for (uint32_t i = 0; i < kSize; ++i) {
+            A[i] = i;                          // uints, not floats
+            B[i] = static_cast<float>(i + 1);  // floats
+        }
+        // (EasyVK should flush/unmap on scope-exit for non-coherent memory)
+    }
 
-		printf("Loading host buffers to device...\n");
-		a.store(a_host.data(), size * sizeof(uint32_t));
-		b.store(b_host.data(), size * sizeof(float));
-
-		printf("Setting up program...\n");
-
+    // 3) Load SPIR-V and configure the compute program --------------------------
 #ifdef USE_EMBEDDED_SPIRV
-		// Use embedded SPIR-V
-		std::vector<uint32_t> spvCode =
-#include "vect-add.cinit"
-		;
-		auto program = easyvk::Program(device, spvCode, bufs);
+    std::vector<uint32_t> spvCode =
+    #include "vect-add.cinit"
+    ;
 #else
-		// Use .spv file loading
-		const char *spvFile = "vect-add.spv";
-		auto program = easyvk::Program(device, spvFile, bufs);
+    std::vector<uint32_t> spvCode = easyvk::readSpirv("vect-add.spv");
 #endif
 
-		program.setWorkgroups(size);
-		program.setWorkgroupSize(1);
+    easyvk::ComputeBindings binds;
+    binds.addStorage(0, aBuf); // binding = 0 (uint32_t*)
+    binds.addStorage(1, bBuf); // binding = 1 (float*)
+    binds.addStorage(2, cBuf); // binding = 2 (float*)
 
-		// Run the kernel.
-		printf("Running program...\n");
-		program.initialize("litmus_test");
-		float runtime = program.runWithDispatchTiming();
-		printf("Performed vector add in %.5fms\n", runtime / 1000000.0);
+    easyvk::ComputeProgramInfo info;
+    info.spirv             = &spvCode;
+    info.localX            = kLocalSize; // specialization constants 0/1/2
+    info.localY            = 1;
+    info.localZ            = 1;
+    // Some clspv builds declare a small push-constant block;
+    info.pushConstantBytes = 16;
+    info.entryPointName    = "litmus_test";
+    info.bindings          = binds;
 
-		// Check the output.
-		printf("Loading results from device...\n");
-		std::vector<float> c_host(size);
-		c.load(c_host.data(), size * sizeof(float));
-		printf("Checking results...\n");
-		for (int i = 0; i < size; i++) {
-			//printf("%d : %d + %f = %f\n", i, a_host[i], b_host[i], c_host[i]);
-			assert(c_host[i] == a_host[i] + b_host[i]);
-		}
+    easyvk::ComputeProgram program(device, info);
 
-		printf("Vector add completed successfully!\n");
+    struct PC { uint32_t region_offset[3]; };
+    PC pc{{0,0,0}}; // typical case
+    program.setPushConstants(pc); // internally vkCmdPushConstants(..., 0, 16, &pc)
 
-		// Cleanup.
-		a.teardown();
-		b.teardown();
-		c.teardown();
-		program.teardown();
-	}
+    constexpr uint32_t groupsX = (kSize + kLocalSize - 1u) / kLocalSize;
+    program.setWorkgroups(groupsX, 1, 1);
 
-	device.teardown();
-	instance.teardown();
-	return 0;
+    // 4) Dispatch (with optional timestamp timing) ------------------------------
+    std::cout << "Running program...\n";
+    double ns = program.supportsTimestamps()
+              ? program.dispatchWithTimingNs()
+              : (program.dispatch(), 0.0);
+    if (ns > 0.0) std::cout << "Completed in " << (ns / 1e6) << " ms\n";
+
+    // 5) Read back and validate -------------------------------------------------
+    std::vector<float> out(kSize);
+    {
+        auto mapC = cBuf.mapRead(0, cBuf.size());
+        std::memcpy(out.data(), mapC.data(), cBuf.size());
+    }
+
+    for (uint32_t i = 0; i < kSize; ++i) {
+        const float expect = float(i) + float(i + 1); // = 2*i + 1
+        assert(std::fabs(out[i] - expect) < 1e-6f);
+    }
+    std::cout << "Validation passed!\n";
+    return 0;
 }
