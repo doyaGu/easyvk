@@ -259,22 +259,16 @@ namespace easyvk {
         dedupCStrs(enabledExtensions);
         dedupCStrs(enabledLayers);
 
-        // Configurable portability enumeration support
         VkInstanceCreateFlags instanceCreateFlags = 0;
-        bool wantPortability =
-#ifdef EASYVK_ENABLE_PORTABILITY_ENUMERATION
-                true
-#else
-                info.enablePortabilityEnumeration
-#endif
-            ;
 
-        if (wantPortability && hasPortabilityEnum) {
-            enabledExtensions.push_back("VK_KHR_portability_enumeration");
-            dedupCStrs(enabledExtensions);
-            instanceCreateFlags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-        } else if (wantPortability && !hasPortabilityEnum) {
-            evk_log("Warning: VK_KHR_portability_enumeration not available on this platform\n");
+        if (info.enablePortabilityEnumeration) {
+            if (hasPortabilityEnum) {
+                enabledExtensions.push_back("VK_KHR_portability_enumeration");
+                dedupCStrs(enabledExtensions);
+                instanceCreateFlags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+            } else {
+                evk_log("Warning: VK_KHR_portability_enumeration not available on this platform\n");
+            }
         }
 
         VkApplicationInfo appInfo{
@@ -344,11 +338,7 @@ namespace easyvk {
         : instance_(VK_NULL_HANDLE),
           debugMessenger_(VK_NULL_HANDLE),
           validationEnabled_(false),
-#if defined(EASYVK_DEFAULT_ENABLE_DEBUG_UTILS)
-          debugUtilsEnabled_(true),
-#else
           debugUtilsEnabled_(false),
-#endif
           tornDown_(false) {
         InstanceCreateInfo info;
         info.enableValidationLayers = enableValidationLayers;

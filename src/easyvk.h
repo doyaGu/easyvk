@@ -52,9 +52,6 @@ namespace easyvk {
     // Switch to a non-throwing mode (methods return bool/Result, store lastError).
     // #define EASYVK_NO_EXCEPTIONS
     // Default-on convenience toggles (implementations soft-fail if unsupported):
-    // #define EASYVK_DEFAULT_ENABLE_DEBUG_UTILS 1
-    // #define EASYVK_DEFAULT_ENABLE_ROBUSTNESS2 1
-    // #define EASYVK_ENABLE_PORTABILITY_ENUMERATION 1
     // #define EASYVK_USE_SPIRV_TOOLS 1
     // #define EASYVK_USE_VMA 1
 
@@ -133,11 +130,7 @@ namespace easyvk {
 
         InstanceCreateInfo()
             : enableValidationLayers(false),
-#if defined(EASYVK_DEFAULT_ENABLE_DEBUG_UTILS)
-              enableDebugUtils(true),
-#else
               enableDebugUtils(false),
-#endif
               enableLayerSettings(false),
               enablePortabilityEnumeration(
 #ifdef __APPLE__
@@ -197,12 +190,8 @@ namespace easyvk {
 
         DeviceCreateInfo()
             : preferredIndex(-1),
-              enableRobustBufferAccess(true),
-#ifdef EASYVK_DEFAULT_ENABLE_ROBUSTNESS2
-              enableRobustness2(true),
-#else
+              enableRobustBufferAccess(false),
               enableRobustness2(false),
-#endif
               enableDebugMarkers(false) {}
     };
 

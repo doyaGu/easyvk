@@ -60,36 +60,15 @@ endif ()
 if (EASYVK_MAIN_PROJECT)
     option(EASYVK_INSTALL "Enable installation" ON)
     option(EASYVK_BUILD_EXAMPLES "Build examples" ON)
-    option(EASYVK_ENABLE_PORTABILITY_ENUMERATION "Opt into VK_KHR_portability_enumeration" ON)
     option(EASYVK_USE_SPIRV_TOOLS "Validate SPIR-V modules at runtime" OFF)
-    option(EASYVK_DEFAULT_ENABLE_DEBUG_UTILS "Enable debug utils by default" OFF)
-    option(EASYVK_DEFAULT_ENABLE_ROBUSTNESS2 "Enable robustness2 by default" OFF)
     option(EASYVK_USE_VMA "Use Vulkan Memory Allocator for buffers" OFF)
 else ()
     option(EASYVK_INSTALL "Enable installation" OFF)
     option(EASYVK_BUILD_EXAMPLES "Build examples" OFF)
-    option(EASYVK_ENABLE_PORTABILITY_ENUMERATION "Opt into VK_KHR_portability_enumeration" ON)
     option(EASYVK_USE_SPIRV_TOOLS "Validate SPIR-V modules at runtime" OFF)
-    option(EASYVK_DEFAULT_ENABLE_DEBUG_UTILS "Enable debug utils by default" OFF)
-    option(EASYVK_DEFAULT_ENABLE_ROBUSTNESS2 "Enable robustness2 by default" OFF)
     option(EASYVK_USE_VMA "Use Vulkan Memory Allocator for buffers" OFF)
     # Hide options from cache in subproject mode
-    mark_as_advanced(EASYVK_INSTALL EASYVK_BUILD_EXAMPLES EASYVK_ENABLE_PORTABILITY_ENUMERATION
-            EASYVK_USE_SPIRV_TOOLS EASYVK_DEFAULT_ENABLE_DEBUG_UTILS
-            EASYVK_DEFAULT_ENABLE_ROBUSTNESS2 EASYVK_USE_VMA)
-endif ()
-
-# Configure compile definitions based on options
-if (EASYVK_ENABLE_PORTABILITY_ENUMERATION)
-    target_compile_definitions(easyvk PRIVATE EASYVK_ENABLE_PORTABILITY_ENUMERATION=1)
-endif ()
-
-if (EASYVK_DEFAULT_ENABLE_DEBUG_UTILS)
-    target_compile_definitions(easyvk PRIVATE EASYVK_DEFAULT_ENABLE_DEBUG_UTILS=1)
-endif ()
-
-if (EASYVK_DEFAULT_ENABLE_ROBUSTNESS2)
-    target_compile_definitions(easyvk PRIVATE EASYVK_DEFAULT_ENABLE_ROBUSTNESS2=1)
+    mark_as_advanced(EASYVK_INSTALL EASYVK_BUILD_EXAMPLES EASYVK_USE_SPIRV_TOOLS EASYVK_USE_VMA)
 endif ()
 
 # SPIR-V Tools integration
