@@ -17,19 +17,6 @@
    This file has been modified by doyaGu.
 */
 
-// easyvk.h - Minimal, safe, and consistent C++11 Vulkan compute helper
-// -------------------------------------------------------------------
-// Design:
-//  - Flat, developer-friendly API: *Info structs, no nested classes.
-//  - Configurable creation-time behavior (portability, validation, allocators).
-//  - RAII mapping with correct non-coherent alignment + clamping.
-//  - Safe default barrier (Compute -> Host) in dispatch() for readback.
-//  - Robustness toggles (robustBufferAccess / VK_EXT_robustness2).
-//  - Programmatic validation / debug utils helpers.
-//  - Optional SPIR-V validation and VMA integration.
-//
-// Build: C++11, depends on <volk.h>. Define VK_NO_PROTOTYPES in your build.
-
 #ifndef EASYVK_H
 #define EASYVK_H
 
@@ -54,7 +41,6 @@ namespace easyvk {
     // -------- Public compile options --------------------------------------------
     // Switch to a non-throwing mode (methods return bool/Result, store lastError).
     // #define EASYVK_NO_EXCEPTIONS
-    // Default-on convenience toggles (implementations soft-fail if unsupported):
     // #define EASYVK_USE_SPIRV_TOOLS 1
     // #define EASYVK_USE_VMA 1
 
