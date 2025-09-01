@@ -13,7 +13,7 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 
-   Modifications Copyright © 2025 doyaGu
+   Modifications Copyright 2025 doyaGu
    This file has been modified by doyaGu.
 */
 
