@@ -1006,8 +1006,7 @@ namespace easyvk {
         }
         validateRange(offsetBytes, lengthBytes, "mapRead");
 
-        if (hostAccess_ == HostAccess::None ||
-            (hostAccess_ != HostAccess::Read && hostAccess_ != HostAccess::ReadWrite)) {
+        if (hostAccess_ == HostAccess::None || (hostAccess_ != HostAccess::Read && hostAccess_ != HostAccess::ReadWrite)) {
             EVK_FAIL("Buffer does not support read mapping");
         }
 
@@ -1818,6 +1817,7 @@ namespace easyvk {
         if (!supportsTimestamps() || !timestampInFlight_) {
             return false;
         }
+
         struct QueryPair { uint64_t value; uint64_t available; };
         QueryPair q[2] = {};
         VkResult result = vkGetQueryPoolResults(device_->vk(), timestampQueryPool_, 0, 2,
