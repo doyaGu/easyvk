@@ -493,38 +493,50 @@ namespace easyvk {
           timestampPeriod_(0.0),
           tornDown_(false)
 #ifdef EASYVK_USE_VMA
-          , allocator_(VK_NULL_HANDLE)
+      , allocator_(VK_NULL_HANDLE)
 #endif
     {
+        // 1. Select a physical device
         std::vector<VkPhysicalDevice> devices = inst.physicalDevices();
         phys_ = selectBestDevice(devices, info.preferredIndex);
-
         if (phys_ == VK_NULL_HANDLE) {
             EVK_FAIL("No suitable physical device found");
         }
 
+        // 2. Retrieve queue family info and device properties
         queueFamilyIndex_ = findComputeQueueFamily(phys_);
         if (queueFamilyIndex_ == UINT32_MAX) {
             EVK_FAIL("No compute queue family found");
         }
 
-        // Get device properties and limits
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(phys_, &props);
         limits_ = props.limits;
 
-        // Check timestamp support
+        // 3. Gather queue family properties
         uint32_t queueFamilyCount = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(phys_, &queueFamilyCount, nullptr);
         std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
         vkGetPhysicalDeviceQueueFamilyProperties(phys_, &queueFamilyCount, queueFamilies.data());
 
+        // Check for timestamp support
         if (queueFamilyIndex_ < queueFamilies.size()) {
             supportsTimestamps_ = (queueFamilies[queueFamilyIndex_].timestampValidBits > 0) && (props.limits.timestampPeriod > 0);
             timestampPeriod_ = static_cast<double>(props.limits.timestampPeriod);
         }
 
-        // Check for extension support
+        // 4. Locate a dedicated transfer queue family, if available
+        uint32_t transferFamily = queueFamilyIndex_; // Default to using compute queue for transfers
+        for (uint32_t i = 0; i < queueFamilyCount; ++i) {
+            auto flags = queueFamilies[i].queueFlags;
+            if ((flags & VK_QUEUE_TRANSFER_BIT) &&
+                !(flags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT))) {
+                transferFamily = i;
+                break;
+            }
+        }
+
+        // 5. Enumerate and enable device extensions
         uint32_t deviceExtensionCount;
         vkEnumerateDeviceExtensionProperties(phys_, nullptr, &deviceExtensionCount, nullptr);
         std::vector<VkExtensionProperties> extensions(deviceExtensionCount);
@@ -534,24 +546,27 @@ namespace easyvk {
         bool hasRobustness2 = false;
 
         for (const auto &extension : extensions) {
-            if (strcmp(extension.extensionName, "VK_EXT_robustness2") == 0) {
+            if (strcmp(extension.extensionName, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME) == 0) {
                 hasRobustness2 = true;
                 if (info.enableRobustness2) {
-                    enabledExtensions.push_back("VK_EXT_robustness2");
+                    enabledExtensions.push_back(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
                 }
-            } else if (strcmp(extension.extensionName, "VK_KHR_portability_subset") == 0) {
-                enabledExtensions.push_back("VK_KHR_portability_subset");
-            } else if (strcmp(extension.extensionName, "VK_EXT_debug_marker") == 0) {
+            } else if (strcmp(extension.extensionName, VK_EXT_DEBUG_MARKER_EXTENSION_NAME) == 0) {
                 if (info.enableDebugMarkers) {
-                    enabledExtensions.push_back("VK_EXT_debug_marker");
+                    enabledExtensions.push_back(VK_EXT_DEBUG_MARKER_EXTENSION_NAME);
                     debugMarkersEnabled_ = true;
                 }
             } else if (strcmp(extension.extensionName, VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME) == 0) {
                 enabledExtensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
+            } else if (strcmp(extension.extensionName, "VK_KHR_portability_subset") == 0) {
+                enabledExtensions.push_back("VK_KHR_portability_subset");
             }
         }
 
-        // Setup device features
+        // 6. Configure device feature chains (pNext chain)
+        void *pNextChain = nullptr;
+
+        // 6.1 Robustness2 features
         VkPhysicalDeviceRobustness2FeaturesEXT robustness2Features{
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
             nullptr,
@@ -575,14 +590,20 @@ namespace easyvk {
             robustness2Features.robustImageAccess2 = supported.robustImageAccess2;
             robustness2Features.nullDescriptor = supported.nullDescriptor;
             robustness2Enabled_ = true;
+            pNextChain = &robustness2Features;
         }
 
+        // 6.2 Basic device features
         VkPhysicalDeviceFeatures deviceFeatures{};
         deviceFeatures.robustBufferAccess = info.enableRobustBufferAccess ? VK_TRUE : VK_FALSE;
         robustAccessEnabled_ = info.enableRobustBufferAccess;
 
+        // 6.3 Set up queue creation info
+        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
         float priority = 1.0f;
-        VkDeviceQueueCreateInfo queueCreateInfo{
+
+        // Add compute queue
+        VkDeviceQueueCreateInfo computeQueueInfo{
             VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
             nullptr,
             0,
@@ -590,24 +611,104 @@ namespace easyvk {
             1,
             &priority
         };
+        queueCreateInfos.push_back(computeQueueInfo);
 
+        // Optionally add dedicated transfer queue
+        if (transferFamily != queueFamilyIndex_) {
+            VkDeviceQueueCreateInfo transferQueueInfo{
+                VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                nullptr,
+                0,
+                transferFamily,
+                1,
+                &priority
+            };
+            queueCreateInfos.push_back(transferQueueInfo);
+        }
+
+        // 7. Set up API feature structures via pNext
+        // 7.1 Timeline semaphore (Vulkan 1.2 core or extension support)
+        VkPhysicalDeviceVulkan12Features vulkan12Features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+        VkPhysicalDeviceTimelineSemaphoreFeaturesKHR timelineSemaphoreFeatures{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR
+        };
+
+        if (VK_API_VERSION_MAJOR(props.apiVersion) > 1 ||
+            (VK_API_VERSION_MAJOR(props.apiVersion) == 1 && VK_API_VERSION_MINOR(props.apiVersion) >= 2)) {
+            vulkan12Features.timelineSemaphore = VK_TRUE;
+            vulkan12Features.pNext = pNextChain;
+            pNextChain = &vulkan12Features;
+            timelineEnabled_ = true;
+        } else {
+            for (const auto &extension : extensions) {
+                if (strcmp(extension.extensionName, "VK_KHR_timeline_semaphore") == 0) {
+                    enabledExtensions.push_back("VK_KHR_timeline_semaphore");
+                    timelineSemaphoreFeatures.timelineSemaphore = VK_TRUE;
+                    timelineSemaphoreFeatures.pNext = pNextChain;
+                    pNextChain = &timelineSemaphoreFeatures;
+                    timelineEnabled_ = true;
+                    break;
+                }
+            }
+        }
+
+        // 7.2 Synchronization2 (Vulkan 1.3 core or extension)
+        VkPhysicalDeviceSynchronization2FeaturesKHR sync2Features{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR
+        };
+        VkPhysicalDeviceVulkan13Features vulkan13Features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+
+        if (VK_API_VERSION_MAJOR(props.apiVersion) > 1 ||
+            (VK_API_VERSION_MAJOR(props.apiVersion) == 1 && VK_API_VERSION_MINOR(props.apiVersion) >= 3)) {
+            vulkan13Features.synchronization2 = VK_TRUE;
+            vulkan13Features.pNext = pNextChain;
+            pNextChain = &vulkan13Features;
+            sync2Enabled_ = true;
+        } else {
+            for (const auto &extension : extensions) {
+                if (strcmp(extension.extensionName, "VK_KHR_synchronization2") == 0) {
+                    enabledExtensions.push_back("VK_KHR_synchronization2");
+                    sync2Features.synchronization2 = VK_TRUE;
+                    sync2Features.pNext = pNextChain;
+                    pNextChain = &sync2Features;
+                    // sync2Enabled_ will be finalized after function availability checks
+                    break;
+                }
+            }
+        }
+
+        // 8. Create the logical device
         VkDeviceCreateInfo deviceCreateInfo{
             VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-            robustness2Enabled_ ? &robustness2Features : nullptr,
+            pNextChain,
             0,
-            1, &queueCreateInfo,
-            0, nullptr,
-            static_cast<uint32_t>(enabledExtensions.size()), enabledExtensions.data(),
+            static_cast<uint32_t>(queueCreateInfos.size()),
+            queueCreateInfos.data(),
+            0,
+            nullptr,
+            static_cast<uint32_t>(enabledExtensions.size()),
+            enabledExtensions.data(),
             &deviceFeatures
         };
 
         VK_CHECK(vkCreateDevice(phys_, &deviceCreateInfo, nullptr, &device_));
-        vkGetDeviceQueue(device_, queueFamilyIndex_, 0, &queue_);
 
-        // Load device-scoped entry points (fast path, skips loader dispatch)
+        // 9. Retrieve queue handles
+        vkGetDeviceQueue(device_, queueFamilyIndex_, 0, &queue_);
+        if (transferFamily != queueFamilyIndex_) {
+            vkGetDeviceQueue(device_, transferFamily, 0, &transferQueue_);
+            transferQueueFamilyIndex_ = transferFamily;
+        }
+
+        // 10. Load device-level function pointers via volk
         volkLoadDevice(device_);
 
-        // Create transfer command pool
+        // Finalize sync2 availability check
+        if (!sync2Enabled_) {
+            sync2Enabled_ = (vkQueueSubmit2 != nullptr);
+        }
+
+        // 11. Create transfer command pool
         VkCommandPoolCreateInfo poolInfo{
             VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
             nullptr,
@@ -617,7 +718,7 @@ namespace easyvk {
         VK_CHECK(vkCreateCommandPool(device_, &poolInfo, nullptr, &transferCmdPool_));
 
 #ifdef EASYVK_USE_VMA
-        // Initialize VMA allocator
+        // 12. Initialize VMA (Vulkan Memory Allocator)
         VmaAllocatorCreateInfo vmaCreateInfo{};
         vmaCreateInfo.instance = inst.vk();
         vmaCreateInfo.physicalDevice = phys_;
@@ -654,12 +755,16 @@ namespace easyvk {
           phys_(other.phys_),
           device_(other.device_),
           queue_(other.queue_),
+          transferQueue_(other.transferQueue_),
           queueFamilyIndex_(other.queueFamilyIndex_),
+          transferQueueFamilyIndex_(other.transferQueueFamilyIndex_),
           limits_(other.limits_),
           transferCmdPool_(other.transferCmdPool_),
           robustAccessEnabled_(other.robustAccessEnabled_),
           robustness2Enabled_(other.robustness2Enabled_),
           debugMarkersEnabled_(other.debugMarkersEnabled_),
+          timelineEnabled_(other.timelineEnabled_),
+          sync2Enabled_(other.sync2Enabled_),
           supportsTimestamps_(other.supportsTimestamps_),
           timestampPeriod_(other.timestampPeriod_),
           tornDown_(other.tornDown_)
@@ -669,8 +774,12 @@ namespace easyvk {
     {
         other.device_ = VK_NULL_HANDLE;
         other.queue_ = VK_NULL_HANDLE;
+        other.transferQueue_ = VK_NULL_HANDLE;
         other.transferCmdPool_ = VK_NULL_HANDLE;
         other.phys_ = VK_NULL_HANDLE;
+        other.transferQueueFamilyIndex_ = UINT32_MAX;
+        other.timelineEnabled_ = false;
+        other.sync2Enabled_ = false;
         other.tornDown_ = true;
 #ifdef EASYVK_USE_VMA
         other.allocator_ = VK_NULL_HANDLE;
@@ -684,12 +793,16 @@ namespace easyvk {
             phys_ = other.phys_;
             device_ = other.device_;
             queue_ = other.queue_;
+            transferQueue_ = other.transferQueue_;
             queueFamilyIndex_ = other.queueFamilyIndex_;
+            transferQueueFamilyIndex_ = other.transferQueueFamilyIndex_;
             limits_ = other.limits_;
             transferCmdPool_ = other.transferCmdPool_;
             robustAccessEnabled_ = other.robustAccessEnabled_;
             robustness2Enabled_ = other.robustness2Enabled_;
             debugMarkersEnabled_ = other.debugMarkersEnabled_;
+            timelineEnabled_ = other.timelineEnabled_;
+            sync2Enabled_ = other.sync2Enabled_;
             supportsTimestamps_ = other.supportsTimestamps_;
             timestampPeriod_ = other.timestampPeriod_;
             tornDown_ = other.tornDown_;
@@ -701,8 +814,12 @@ namespace easyvk {
 
             other.device_ = VK_NULL_HANDLE;
             other.queue_ = VK_NULL_HANDLE;
+            other.transferQueue_ = VK_NULL_HANDLE;
             other.transferCmdPool_ = VK_NULL_HANDLE;
             other.phys_ = VK_NULL_HANDLE;
+            other.transferQueueFamilyIndex_ = UINT32_MAX;
+            other.timelineEnabled_ = false;
+            other.sync2Enabled_ = false;
             other.tornDown_ = true;
         }
         return *this;

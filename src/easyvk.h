@@ -200,7 +200,12 @@ namespace easyvk {
         VkDevice vk() const { return device_; }
         VkPhysicalDevice physical() const { return phys_; }
         VkQueue computeQueue() const { return queue_; }
+        // Optional transfer queue (may equal compute when no dedicated family created)
+        VkQueue transferQueue() const { return transferQueue_ ? transferQueue_ : queue_; }
         uint32_t computeQueueFamilyIndex() const { return queueFamilyIndex_; }
+        uint32_t transferQueueFamilyIndex() const { return transferQueueFamilyIndex_ != UINT32_MAX ? transferQueueFamilyIndex_ : queueFamilyIndex_; }
+        bool timelineSemaphoresEnabled() const { return timelineEnabled_; }
+        bool synchronization2Enabled() const { return sync2Enabled_; }
         const VkPhysicalDeviceLimits &limits() const { return limits_; }
 
         // Wait for an async fence (copy/dispatch). Consumes & destroys the fence and frees
@@ -229,12 +234,16 @@ namespace easyvk {
         VkPhysicalDevice phys_;
         VkDevice device_;
         VkQueue queue_;
+        VkQueue transferQueue_ = VK_NULL_HANDLE;
         uint32_t queueFamilyIndex_;
+        uint32_t transferQueueFamilyIndex_ = UINT32_MAX;
         VkPhysicalDeviceLimits limits_;
         VkCommandPool transferCmdPool_; // internal one-time submit pool
         bool robustAccessEnabled_;
         bool robustness2Enabled_;
         bool debugMarkersEnabled_;
+        bool timelineEnabled_ = false;
+        bool sync2Enabled_ = false;
         bool supportsTimestamps_;
         double timestampPeriod_;
         bool tornDown_;
