@@ -811,12 +811,12 @@ namespace easyvk {
           , allocator_(other.allocator_)
 #endif
     {
+        other.phys_ = VK_NULL_HANDLE;
         other.device_ = VK_NULL_HANDLE;
         other.queue_ = VK_NULL_HANDLE;
         other.transferQueue_ = VK_NULL_HANDLE;
-        other.transferCmdPool_ = VK_NULL_HANDLE;
-        other.phys_ = VK_NULL_HANDLE;
         other.transferQueueFamilyIndex_ = UINT32_MAX;
+        other.transferCmdPool_ = VK_NULL_HANDLE;
         other.timelineEnabled_ = false;
         other.sync2Enabled_ = false;
         other.tornDown_ = true;
@@ -851,12 +851,12 @@ namespace easyvk {
             other.allocator_ = VK_NULL_HANDLE;
 #endif
 
+            other.phys_ = VK_NULL_HANDLE;
             other.device_ = VK_NULL_HANDLE;
             other.queue_ = VK_NULL_HANDLE;
             other.transferQueue_ = VK_NULL_HANDLE;
-            other.transferCmdPool_ = VK_NULL_HANDLE;
-            other.phys_ = VK_NULL_HANDLE;
             other.transferQueueFamilyIndex_ = UINT32_MAX;
+            other.transferCmdPool_ = VK_NULL_HANDLE;
             other.timelineEnabled_ = false;
             other.sync2Enabled_ = false;
             other.tornDown_ = true;
