@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.10)
 
 project(EasyVK VERSION 2.0.0 LANGUAGES CXX C)
 
+include(FetchContent)
+
 # Check if this is the main project or a subproject
 set(EASYVK_MAIN_PROJECT OFF)
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
@@ -85,14 +87,18 @@ endif ()
 
 # Vulkan Memory Allocator integration
 if (EASYVK_USE_VMA)
-    find_path(VMA_INCLUDE_DIR
-            NAMES vk_mem_alloc.h
-            PATHS ${CMAKE_CURRENT_SOURCE_DIR}/extern/VMA/include
-            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/VMA/include
+    FetchContent_Declare(
+            VulkanMemoryAllocator
+            GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+            GIT_TAG 1d8f600fd424278486eade7ed3e877c99f0846b1 # v3.3.0
+            GIT_SHALLOW TRUE
     )
-    if (VMA_INCLUDE_DIR)
-        target_include_directories(easyvk PRIVATE ${VMA_INCLUDE_DIR})
+
+    FetchContent_MakeAvailable(VulkanMemoryAllocator)
+
+    if (vulkanmemoryallocator_POPULATED)
         target_compile_definitions(easyvk PRIVATE EASYVK_USE_VMA=1)
+        target_link_libraries(easyvk PUBLIC VulkanMemoryAllocator)
         message(STATUS "EasyVK: VMA integration enabled")
     else ()
         message(WARNING "EasyVK: VMA headers not found, disabling VMA integration")
@@ -110,6 +116,16 @@ if (EASYVK_INSTALL)
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
             INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
+
+    if (EASYVK_USE_VMA)
+        install(TARGETS VulkanMemoryAllocator
+                EXPORT EasyVKTargets
+                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+                INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        )
+    endif ()
 
     install(FILES src/easyvk.h
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
