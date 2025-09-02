@@ -16,7 +16,9 @@
    Modifications Copyright 2025 doyaGu
    This file has been modified by doyaGu.
 */
-
+#ifdef EASYVK_USE_VMA
+#define VMA_IMPLEMENTATION
+#endif
 #include "easyvk.h"
 
 #include <cstring>
@@ -751,11 +753,16 @@ namespace easyvk {
 
 #ifdef EASYVK_USE_VMA
         // 12. Initialize VMA (Vulkan Memory Allocator)
+        VmaVulkanFunctions vmaFns{};
+        vmaFns.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+        vmaFns.vkGetDeviceProcAddr   = vkGetDeviceProcAddr;
+
         VmaAllocatorCreateInfo vmaCreateInfo{};
         vmaCreateInfo.instance = inst.vk();
         vmaCreateInfo.physicalDevice = phys_;
         vmaCreateInfo.device = device_;
         vmaCreateInfo.vulkanApiVersion = info.apiVersion;
+        vmaCreateInfo.pVulkanFunctions = &vmaFns;
 
         VK_CHECK(vmaCreateAllocator(&vmaCreateInfo, &allocator_));
 #endif
@@ -1412,17 +1419,19 @@ namespace easyvk {
             VmaAllocationCreateInfo allocInfo{};
             if (hostAccess_ == HostAccess::None) {
                 allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-            } else {
+            } else if (hostAccess_ == HostAccess::Write) {
                 allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
                 allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-                if (hostAccess_ == HostAccess::Read || hostAccess_ == HostAccess::ReadWrite) {
-                    allocInfo.flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
-                }
+            } else if (hostAccess_ == HostAccess::Read) {
+                allocInfo.usage = VMA_MEMORY_USAGE_GPU_TO_CPU;
+                allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+            } else { // HostAccess::ReadWrite
+                allocInfo.usage = VMA_MEMORY_USAGE_GPU_TO_CPU;
+                allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
             }
 
             VmaAllocationInfo allocationInfo;
-            VkResult result = vmaCreateBuffer(device_->allocator(), &bufferInfo, &allocInfo,
-                                           buf, &allocation_, &allocationInfo);
+            VkResult result = vmaCreateBuffer(device_->allocator(), &bufferInfo, &allocInfo, buf, &allocation_, &allocationInfo);
             if (result != VK_SUCCESS) {
 #ifdef EASYVK_NO_EXCEPTIONS
                 lastError_ = "VMA buffer creation failed: " + std::string(vkResultString(result));
